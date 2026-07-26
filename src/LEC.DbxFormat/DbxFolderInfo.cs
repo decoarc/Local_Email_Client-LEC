@@ -11,6 +11,15 @@ public sealed class DbxFolderInfo
     public int MessageCount { get; init; }
     public DbxSpecialFolderType SpecialFolderType { get; init; }
 
+    /// <summary>
+    /// True if any attribute in this folder's info node was pointer-form with a
+    /// computed offset that landed outside the file (an invalid pointer, per
+    /// ARQUITETURA.md 7.4) -- as opposed to a legitimately absent direct attribute.
+    /// Callers should treat this as a corruption signal even though the folder
+    /// itself is still returned with the affected field(s) defaulted.
+    /// </summary>
+    public bool HasOutOfRangeAttribute { get; init; }
+
     public static DbxFolderInfo Read(IDbxByteSource source, int indexNodeOffset)
     {
         var attrs = DbxAttributeReader.Read(source, indexNodeOffset);
@@ -18,9 +27,13 @@ public sealed class DbxFolderInfo
         int folderId = 0, parentId = 0, flags = 0, messageCount = 0;
         string? name = null, fileName = null;
         var specialType = DbxSpecialFolderType.None;
+        bool hasOutOfRangeAttribute = false;
 
         foreach (var a in attrs)
         {
+            if (a.IsOffsetOutOfRange)
+                hasOutOfRangeAttribute = true;
+
             switch ((DbxFolderFieldId)a.FieldId)
             {
                 case DbxFolderFieldId.FolderId:
@@ -60,6 +73,7 @@ public sealed class DbxFolderInfo
             Flags = flags,
             MessageCount = messageCount,
             SpecialFolderType = specialType,
+            HasOutOfRangeAttribute = hasOutOfRangeAttribute,
         };
     }
 

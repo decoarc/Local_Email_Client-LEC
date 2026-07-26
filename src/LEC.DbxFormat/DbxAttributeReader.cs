@@ -23,12 +23,18 @@ public static class DbxAttributeReader
             byte rawType = (byte)(raw & DbxFormat.AttributeTypeByteMask);
             uint value = (raw >> DbxFormat.AttributeValueShift) & DbxFormat.AttributeValueMask;
 
+            bool isDirect = (rawType & DbxFormat.AttributeDirectFlag) != 0;
             long candidateOffset = dataAreaStart + value;
-            int? dataOffset = (rawType & DbxFormat.AttributeDirectFlag) != 0 || candidateOffset >= source.Length
-                ? null
-                : (int)candidateOffset;
 
-            records.Add(new DbxAttributeRecord(rawType, value, dataOffset));
+            // A direct attribute legitimately has no DataOffset (its value lives inline in
+            // Value) -- that is NOT corruption. A pointer-form (non-direct) attribute whose
+            // computed offset lands outside the file IS corruption: the pointer is invalid.
+            // These two "DataOffset == null" cases must stay distinguishable to callers, so
+            // only the latter sets IsOffsetOutOfRange.
+            bool isOffsetOutOfRange = !isDirect && candidateOffset >= source.Length;
+            int? dataOffset = isDirect || isOffsetOutOfRange ? null : (int)candidateOffset;
+
+            records.Add(new DbxAttributeRecord(rawType, value, dataOffset, isOffsetOutOfRange));
         }
 
         return records;

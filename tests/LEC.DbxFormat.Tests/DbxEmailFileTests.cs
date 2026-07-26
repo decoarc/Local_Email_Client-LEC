@@ -113,7 +113,7 @@ public class DbxEmailFileTests
     }
 
     [Fact]
-    public void DoesNotThrowWhenAPointerFormIntegerAttributeOffsetIsOutOfRange()
+    public void FlagsPartialHealthWhenAPointerFormIntegerAttributeOffsetIsOutOfRange()
     {
         // Regression test for the re-review Critical finding: a prior fix made pointer-form
         // attributes whose computed offset is out of range get DataOffset = null instead of
@@ -125,6 +125,13 @@ public class DbxEmailFileTests
         // DoesNotThrowWhenAnAttributeOffsetIsOneByteFromEndOfFile (a pointer-form FILETIME, 8-byte
         // ReadInt64 path), this uses a pointer-form INTEGER attribute so it exercises ReadInt's
         // 4-byte ReadInt32 path specifically.
+        //
+        // Follow-up fix (this pass): the null DataOffset alone used to be silently absorbed as
+        // Health.Ok, losing the corruption signal entirely (ARQUITETURA.md 7.4 requires an
+        // invalid pointer to mark Health = Partial, not vanish). DbxAttributeRecord now exposes
+        // IsOffsetOutOfRange to distinguish "legitimately absent" from "corrupted pointer", and
+        // that flows up through DbxMessageInfo.HasOutOfRangeAttribute into OpenFrom's `corrupt`
+        // tracking -- so this scenario must now report Partial while still keeping the message.
         var builder = new TestDbxBuilder();
         builder.WriteHeader(DbxFileType.Email);
 
@@ -166,10 +173,12 @@ public class DbxEmailFileTests
 
         // The out-of-range Flags attribute resolves to DataOffset = null, and the fixed
         // ReadInt treats that as "no valid data" (0) rather than throwing, so the message
-        // itself still parses successfully -- the header count matches and health is Ok.
-        Assert.Equal(StoreHealth.Ok, file.Health);
+        // itself still parses successfully and is retained (per "keep what you can"). But
+        // the invalid pointer must not go unsignaled: the file-level health is Partial.
+        Assert.Equal(StoreHealth.Partial, file.Health);
         Assert.Single(file.Messages);
         Assert.Equal(0, file.Messages[0].Flags);
+        Assert.True(file.Messages[0].HasOutOfRangeAttribute);
     }
 
     [Fact]

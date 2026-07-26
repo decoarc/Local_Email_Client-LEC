@@ -49,7 +49,10 @@ public sealed class DbxFolderFile : IDisposable
 
                 try
                 {
-                    folders.Add(DbxFolderInfo.Read(source, pointer));
+                    var info = DbxFolderInfo.Read(source, pointer);
+                    folders.Add(info);
+                    if (info.HasOutOfRangeAttribute)
+                        corrupt = true; // invalid attribute pointer (ARQUITETURA.md 7.4) -- keep the item, flag the file
                 }
                 catch (Exception ex) when (ex is ArgumentException or IndexOutOfRangeException or InvalidOperationException)
                 {

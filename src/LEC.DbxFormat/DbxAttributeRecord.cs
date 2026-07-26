@@ -1,6 +1,6 @@
 namespace LEC.DbxFormat;
 
-public readonly record struct DbxAttributeRecord(byte RawType, uint Value, int? DataOffset)
+public readonly record struct DbxAttributeRecord(byte RawType, uint Value, int? DataOffset, bool IsOffsetOutOfRange = false)
 {
     public byte FieldId => (byte)(RawType & DbxFormat.AttributeFieldIdMask);
 

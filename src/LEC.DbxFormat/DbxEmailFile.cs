@@ -49,7 +49,10 @@ public sealed class DbxEmailFile : IDisposable
 
                 try
                 {
-                    messages.Add(DbxMessageInfo.Read(source, pointer));
+                    var info = DbxMessageInfo.Read(source, pointer);
+                    messages.Add(info);
+                    if (info.HasOutOfRangeAttribute)
+                        corrupt = true; // invalid attribute pointer (ARQUITETURA.md 7.4) -- keep the item, flag the file
                 }
                 catch (Exception ex) when (ex is ArgumentException or IndexOutOfRangeException or InvalidOperationException)
                 {

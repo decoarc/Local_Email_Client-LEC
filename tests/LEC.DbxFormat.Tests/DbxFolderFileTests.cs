@@ -77,13 +77,19 @@ public class DbxFolderFileTests
     }
 
     [Fact]
-    public void DoesNotThrowWhenAPointerFormIntegerAttributeOffsetIsOutOfRange()
+    public void FlagsPartialHealthWhenAPointerFormIntegerAttributeOffsetIsOutOfRange()
     {
         // Regression test mirroring DbxEmailFileTests' equivalent for DbxFolderInfo's ReadInt
         // path: a corrupted pointer-form MessageCount attribute whose computed offset lands
         // past EOF must resolve to DataOffset = null (per the prior DbxAttributeReader fix),
         // and the fixed ReadInt must treat that as 0 rather than throwing
         // InvalidOperationException via `a.DataOffset!.Value`.
+        //
+        // Follow-up fix (this pass): the null DataOffset alone used to be silently absorbed as
+        // Health.Ok, losing the corruption signal entirely (ARQUITETURA.md 7.4 requires an
+        // invalid pointer to mark Health = Partial, not vanish). DbxFolderInfo.HasOutOfRangeAttribute
+        // now flows that signal into OpenFrom's `corrupt` tracking -- so this scenario must now
+        // report Partial while still keeping the folder.
         var builder = new TestDbxBuilder();
         builder.WriteHeader(DbxFileType.Folder);
 
@@ -118,9 +124,12 @@ public class DbxFolderFileTests
 
         using var file = DbxFolderFile.OpenFrom(new ByteArrayDbxSource(data), ownsSource: true);
 
-        Assert.Equal(StoreHealth.Ok, file.Health);
+        // The folder is still retained (per "keep what you can"), but the invalid pointer
+        // must not go unsignaled: the file-level health is Partial, not Ok.
+        Assert.Equal(StoreHealth.Partial, file.Health);
         Assert.Single(file.Folders);
         Assert.Equal(0, file.Folders[0].MessageCount);
+        Assert.True(file.Folders[0].HasOutOfRangeAttribute);
     }
 
     [Fact]

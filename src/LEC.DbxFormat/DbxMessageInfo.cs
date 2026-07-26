@@ -15,6 +15,15 @@ public sealed class DbxMessageInfo
     public uint MessageSize { get; init; }
     public int Flags { get; init; }
 
+    /// <summary>
+    /// True if any attribute in this message's info node was pointer-form with a
+    /// computed offset that landed outside the file (an invalid pointer, per
+    /// ARQUITETURA.md 7.4) -- as opposed to a legitimately absent direct attribute.
+    /// Callers should treat this as a corruption signal even though the message
+    /// itself is still returned with the affected field(s) defaulted.
+    /// </summary>
+    public bool HasOutOfRangeAttribute { get; init; }
+
     public static DbxMessageInfo Read(IDbxByteSource source, int indexNodeOffset)
     {
         var attrs = DbxAttributeReader.Read(source, indexNodeOffset);
@@ -25,9 +34,13 @@ public sealed class DbxMessageInfo
         DateTime? sendTime = null, receiveTime = null;
         uint messageSize = 0;
         int flags = 0;
+        bool hasOutOfRangeAttribute = false;
 
         foreach (var a in attrs)
         {
+            if (a.IsOffsetOutOfRange)
+                hasOutOfRangeAttribute = true;
+
             switch ((DbxEmailFieldId)a.FieldId)
             {
                 case DbxEmailFieldId.MessageBlockOffset:
@@ -80,6 +93,7 @@ public sealed class DbxMessageInfo
             ReceiveTimeUtc = receiveTime,
             MessageSize = messageSize,
             Flags = flags,
+            HasOutOfRangeAttribute = hasOutOfRangeAttribute,
         };
     }
 
