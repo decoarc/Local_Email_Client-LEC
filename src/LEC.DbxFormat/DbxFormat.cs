@@ -41,6 +41,7 @@ public static class DbxFormat
     public const int AttributeRecordSize = 4;
     public const byte AttributeDirectFlag = 0x80;   // set on the type byte: value is stored inline, not via pointer
     public const byte AttributeFieldIdMask = 0x7F;  // mask off AttributeDirectFlag to get the field's real ID
+    public const uint AttributeTypeByteMask = 0xFF; // extracts the full raw type byte (incl. AttributeDirectFlag) from the packed 32-bit record, before the flag is separately checked
     public const int AttributeValueShift = 8;
     public const uint AttributeValueMask = 0xFFFFFF; // 24-bit payload
 

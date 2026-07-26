@@ -67,5 +67,5 @@ public sealed class DbxFolderInfo
         a.IsDirect ? (int)a.Value : source.ReadInt32(a.DataOffset!.Value);
 
     private static string? ReadString(IDbxByteSource source, DbxAttributeRecord a) =>
-        a.DataOffset is int off ? DbxStringDecoder.Decode(source.ReadCStringBytes(off, 512)) : null;
+        a.DataOffset is int off ? DbxStringDecoder.Decode(source.ReadCStringBytes(off, DbxSafetyLimits.MaxFolderStringBytes)) : null;
 }

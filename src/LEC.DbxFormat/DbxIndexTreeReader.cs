@@ -19,6 +19,9 @@ public sealed class DbxIndexTreeReader
         if (depth > DbxSafetyLimits.MaxIndexTreeDepth)
             return false;
 
+        if (visited.Count > DbxSafetyLimits.MaxIndexNodesVisited)
+            return false;
+
         if (nodeOffset <= 0 || (long)nodeOffset + DbxFormat.IndexNodeHeaderSize > _source.Length)
             return false;
 

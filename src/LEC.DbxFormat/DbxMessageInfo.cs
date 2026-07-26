@@ -87,7 +87,7 @@ public sealed class DbxMessageInfo
         a.IsDirect ? (int)a.Value : source.ReadInt32(a.DataOffset!.Value);
 
     private static string? ReadString(IDbxByteSource source, DbxAttributeRecord a) =>
-        a.DataOffset is int off ? DbxStringDecoder.Decode(source.ReadCStringBytes(off, 4096)) : null;
+        a.DataOffset is int off ? DbxStringDecoder.Decode(source.ReadCStringBytes(off, DbxSafetyLimits.MaxEmailStringBytes)) : null;
 
     private static DateTime? ReadFileTime(IDbxByteSource source, DbxAttributeRecord a)
     {
