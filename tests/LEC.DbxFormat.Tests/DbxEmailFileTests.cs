@@ -68,6 +68,25 @@ public class DbxEmailFileTests
         Assert.Throws<DbxFormatException>(() => DbxEmailFile.OpenFrom(source, ownsSource: true));
     }
 
+    [Fact]
+    public void ReportsCorruptHealthWhenTheHeaderIsTruncated()
+    {
+        // Create a buffer with valid Email signature (16 bytes) but truncated (20 bytes total).
+        // This is shorter than DbxFormat.HeaderIndexPointerOffset + 4 (232 bytes),
+        // so the file should be reported as Corrupt with an empty message list.
+        var data = new byte[20];
+        BitConverter.GetBytes(DbxFormat.SignatureWord0).CopyTo(data, 0);
+        BitConverter.GetBytes(DbxFormat.SignatureWord1Email).CopyTo(data, 4);
+        BitConverter.GetBytes(DbxFormat.SignatureWord2).CopyTo(data, 8);
+        BitConverter.GetBytes(DbxFormat.SignatureWord3).CopyTo(data, 12);
+        // Remaining 4 bytes (16..19) are padding (already zero)
+
+        using var file = DbxEmailFile.OpenFrom(new ByteArrayDbxSource(data), ownsSource: true);
+
+        Assert.Equal(StoreHealth.Corrupt, file.Health);
+        Assert.Empty(file.Messages);
+    }
+
     private static string? FindRealFixture(string relativePath)
     {
         // Walks up from the test's output directory to find the repo root (marker: LEC.sln),
