@@ -1,0 +1,8 @@
+# Build output
+bin/
+obj/
+*.user
+.vs/
+
+# The user's real, irreplaceable legacy mail archive — never committed.
+BCP/
