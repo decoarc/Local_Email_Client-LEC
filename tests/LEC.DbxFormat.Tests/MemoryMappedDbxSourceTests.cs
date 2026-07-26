@@ -44,4 +44,30 @@ public class MemoryMappedDbxSourceTests
             File.Delete(path);
         }
     }
+
+    [Fact]
+    public void ConstructorDisposesFileHandleIfMemoryMappedFileCreationFails()
+    {
+        // Verify that if MemoryMappedFile.CreateFromFile or _mmf.CreateViewAccessor throws
+        // (e.g. on a 0-byte file), the already-opened FileStream is disposed and no handle leaks.
+        string path = Path.Combine(Path.GetTempPath(), $"lec-mmtest-{Guid.NewGuid():N}.dbx");
+        File.WriteAllBytes(path, Array.Empty<byte>()); // 0-byte file will cause MemoryMappedFile.CreateFromFile to throw
+
+        try
+        {
+            Assert.ThrowsAny<Exception>(() => new MemoryMappedDbxSource(path));
+
+            // If the constructor failed to dispose the FileStream, this delete will throw IOException on Windows.
+            // On success, the file deletes cleanly (no handle leak).
+            File.Delete(path);
+        }
+        finally
+        {
+            // Ensure cleanup even if the delete assertion fails.
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+    }
 }

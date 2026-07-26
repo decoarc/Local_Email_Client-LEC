@@ -11,11 +11,27 @@ public sealed class MemoryMappedDbxSource : IDbxByteSource
     public MemoryMappedDbxSource(string path)
     {
         _fileStream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-        Length = _fileStream.Length;
-        _mmf = MemoryMappedFile.CreateFromFile(
-            _fileStream, mapName: null, capacity: 0,
-            MemoryMappedFileAccess.Read, HandleInheritability.None, leaveOpen: true);
-        _accessor = _mmf.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
+        try
+        {
+            Length = _fileStream.Length;
+            _mmf = MemoryMappedFile.CreateFromFile(
+                _fileStream, mapName: null, capacity: 0,
+                MemoryMappedFileAccess.Read, HandleInheritability.None, leaveOpen: true);
+            try
+            {
+                _accessor = _mmf.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
+            }
+            catch
+            {
+                _mmf.Dispose();
+                throw;
+            }
+        }
+        catch
+        {
+            _fileStream.Dispose();
+            throw;
+        }
     }
 
     public long Length { get; }
