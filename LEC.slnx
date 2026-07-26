@@ -1,9 +1,0 @@
-<Solution>
-  <Folder Name="/src/">
-    <Project Path="src/LEC.Cli/LEC.Cli.csproj" />
-    <Project Path="src/LEC.DbxFormat/LEC.DbxFormat.csproj" />
-  </Folder>
-  <Folder Name="/tests/">
-    <Project Path="tests/LEC.DbxFormat.Tests/LEC.DbxFormat.Tests.csproj" />
-  </Folder>
-</Solution>
