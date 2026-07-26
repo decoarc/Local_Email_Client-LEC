@@ -20,12 +20,13 @@ public static class DbxAttributeReader
         for (int i = 0; i < count; i++)
         {
             uint raw = unchecked((uint)source.ReadInt32(arrayStart + i * DbxFormat.AttributeRecordSize));
-            byte rawType = (byte)(raw & 0xFF);
+            byte rawType = (byte)(raw & DbxFormat.AttributeTypeByteMask);
             uint value = (raw >> DbxFormat.AttributeValueShift) & DbxFormat.AttributeValueMask;
 
-            int? dataOffset = (rawType & DbxFormat.AttributeDirectFlag) != 0
+            long candidateOffset = dataAreaStart + value;
+            int? dataOffset = (rawType & DbxFormat.AttributeDirectFlag) != 0 || candidateOffset >= source.Length
                 ? null
-                : (int)(dataAreaStart + value);
+                : (int)candidateOffset;
 
             records.Add(new DbxAttributeRecord(rawType, value, dataOffset));
         }

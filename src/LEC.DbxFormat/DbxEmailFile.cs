@@ -51,12 +51,15 @@ public sealed class DbxEmailFile : IDisposable
                 {
                     messages.Add(DbxMessageInfo.Read(source, pointer));
                 }
-                catch (Exception ex) when (ex is ArgumentOutOfRangeException or IndexOutOfRangeException)
+                catch (Exception ex) when (ex is ArgumentException or IndexOutOfRangeException)
                 {
                     corrupt = true;
                 }
             }
         }
+
+        if (messages.Count != itemCount)
+            corrupt = true;
 
         var health = corrupt ? StoreHealth.Partial : StoreHealth.Ok;
         return new DbxEmailFile(source, ownsSource, health, messages);
