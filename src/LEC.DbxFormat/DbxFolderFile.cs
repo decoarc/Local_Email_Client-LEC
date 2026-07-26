@@ -51,7 +51,7 @@ public sealed class DbxFolderFile : IDisposable
                 {
                     folders.Add(DbxFolderInfo.Read(source, pointer));
                 }
-                catch (Exception ex) when (ex is ArgumentException or IndexOutOfRangeException)
+                catch (Exception ex) when (ex is ArgumentException or IndexOutOfRangeException or InvalidOperationException)
                 {
                     corrupt = true;
                 }

@@ -113,6 +113,66 @@ public class DbxEmailFileTests
     }
 
     [Fact]
+    public void DoesNotThrowWhenAPointerFormIntegerAttributeOffsetIsOutOfRange()
+    {
+        // Regression test for the re-review Critical finding: a prior fix made pointer-form
+        // attributes whose computed offset is out of range get DataOffset = null instead of
+        // an out-of-range int. ReadInt in DbxMessageInfo assumed a non-direct attribute always
+        // has a non-null DataOffset (`a.DataOffset!.Value`), which threw InvalidOperationException
+        // ("Nullable object must have a value") when DataOffset was actually null. That exception
+        // was not in OpenFrom's catch filter, so it escaped uncaught and crashed the whole parse --
+        // reintroducing the "never throw on in-content corruption" violation. Unlike
+        // DoesNotThrowWhenAnAttributeOffsetIsOneByteFromEndOfFile (a pointer-form FILETIME, 8-byte
+        // ReadInt64 path), this uses a pointer-form INTEGER attribute so it exercises ReadInt's
+        // 4-byte ReadInt32 path specifically.
+        var builder = new TestDbxBuilder();
+        builder.WriteHeader(DbxFileType.Email);
+
+        byte[] body = Encoding.ASCII.GetBytes("From: a@b.com\r\nSubject: Hi\r\n\r\nBody");
+        int blockOffset = builder.WriteMessageBlock(body, nextOffset: 0);
+
+        byte[] flagsBytes = BitConverter.GetBytes(42); // arbitrary valid int32, pointer-form (4-byte read)
+        var attrs = new[]
+        {
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxEmailFieldId.MessageBlockOffset, Direct = true, DirectValue = (uint)blockOffset },
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxEmailFieldId.Flags, Data = flagsBytes }, // pointer-form, exercises ReadInt's ReadInt32 path
+        };
+        int infoNodeOffset = builder.WriteInfoNode(attrs);
+
+        int rootOffset = builder.WriteIndexNode(
+            nextTable: 0, ptrCount: 1, indexCount: 0,
+            entries: new[] { (indexPtr: infoNodeOffset, entryNextTable: 0, entryIndexCount: 0) });
+
+        builder.SetInt32At(DbxFormat.HeaderItemCountOffset, 1);
+        builder.SetInt32At(DbxFormat.HeaderIndexPointerOffset, rootOffset);
+
+        byte[] data = builder.ToArray();
+
+        // Patch the Flags attribute record (index 1 of 2) so its computed candidate offset
+        // lands well past EOF. DbxAttributeReader nulls out DataOffset whenever
+        // candidateOffset >= source.Length, which is exactly how the prior fix produces the
+        // null-DataOffset case for a corrupted pointer-form integer attribute.
+        int arrayStart = infoNodeOffset + DbxFormat.InfoNodeAttributeArrayOffset;
+        int dataAreaStart = arrayStart + DbxFormat.AttributeRecordSize * attrs.Length;
+        int recordPos = arrayStart + 1 * DbxFormat.AttributeRecordSize;
+
+        uint rawRecord = BitConverter.ToUInt32(data, recordPos);
+        byte typeByte = (byte)(rawRecord & 0xFF);
+        uint newValue = (uint)(data.Length - dataAreaStart + 1000) & DbxFormat.AttributeValueMask; // well past EOF
+        uint newRecord = typeByte | (newValue << DbxFormat.AttributeValueShift);
+        BitConverter.GetBytes(newRecord).CopyTo(data, recordPos);
+
+        using var file = DbxEmailFile.OpenFrom(new ByteArrayDbxSource(data), ownsSource: true);
+
+        // The out-of-range Flags attribute resolves to DataOffset = null, and the fixed
+        // ReadInt treats that as "no valid data" (0) rather than throwing, so the message
+        // itself still parses successfully -- the header count matches and health is Ok.
+        Assert.Equal(StoreHealth.Ok, file.Health);
+        Assert.Single(file.Messages);
+        Assert.Equal(0, file.Messages[0].Flags);
+    }
+
+    [Fact]
     public void ReportsPartialHealthWhenHeaderItemCountDoesNotMatchTheTreeYield()
     {
         // The header's own item count is the strongest available integrity check --

@@ -77,6 +77,53 @@ public class DbxFolderFileTests
     }
 
     [Fact]
+    public void DoesNotThrowWhenAPointerFormIntegerAttributeOffsetIsOutOfRange()
+    {
+        // Regression test mirroring DbxEmailFileTests' equivalent for DbxFolderInfo's ReadInt
+        // path: a corrupted pointer-form MessageCount attribute whose computed offset lands
+        // past EOF must resolve to DataOffset = null (per the prior DbxAttributeReader fix),
+        // and the fixed ReadInt must treat that as 0 rather than throwing
+        // InvalidOperationException via `a.DataOffset!.Value`.
+        var builder = new TestDbxBuilder();
+        builder.WriteHeader(DbxFileType.Folder);
+
+        byte[] messageCountBytes = BitConverter.GetBytes(7); // arbitrary valid int32, pointer-form (4-byte read)
+        var attrs = new[]
+        {
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxFolderFieldId.FolderId, Direct = true, DirectValue = 1 },
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxFolderFieldId.MessageCount, Data = messageCountBytes }, // pointer-form, exercises ReadInt's ReadInt32 path
+        };
+        int infoNodeOffset = builder.WriteInfoNode(attrs);
+
+        int rootIndexOffset = builder.WriteIndexNode(
+            nextTable: 0, ptrCount: 1, indexCount: 0,
+            entries: new[] { (indexPtr: infoNodeOffset, entryNextTable: 0, entryIndexCount: 0) });
+
+        builder.SetInt32At(DbxFormat.HeaderItemCountOffset, 1);
+        builder.SetInt32At(DbxFormat.HeaderIndexPointerOffset, rootIndexOffset);
+
+        byte[] data = builder.ToArray();
+
+        // Patch the MessageCount attribute record (index 1 of 2) so its computed candidate
+        // offset lands well past EOF, reproducing the null-DataOffset case.
+        int arrayStart = infoNodeOffset + DbxFormat.InfoNodeAttributeArrayOffset;
+        int dataAreaStart = arrayStart + DbxFormat.AttributeRecordSize * attrs.Length;
+        int recordPos = arrayStart + 1 * DbxFormat.AttributeRecordSize;
+
+        uint rawRecord = BitConverter.ToUInt32(data, recordPos);
+        byte typeByte = (byte)(rawRecord & 0xFF);
+        uint newValue = (uint)(data.Length - dataAreaStart + 1000) & DbxFormat.AttributeValueMask; // well past EOF
+        uint newRecord = typeByte | (newValue << DbxFormat.AttributeValueShift);
+        BitConverter.GetBytes(newRecord).CopyTo(data, recordPos);
+
+        using var file = DbxFolderFile.OpenFrom(new ByteArrayDbxSource(data), ownsSource: true);
+
+        Assert.Equal(StoreHealth.Ok, file.Health);
+        Assert.Single(file.Folders);
+        Assert.Equal(0, file.Folders[0].MessageCount);
+    }
+
+    [Fact]
     public void ReportsCorruptHealthWhenTheHeaderIsTruncated()
     {
         // Valid Folder signature (first 16 bytes) but far shorter than the 232-byte
