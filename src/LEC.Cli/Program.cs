@@ -11,35 +11,48 @@ if (args.Length < 2)
 string command = args[0];
 string path = args[1];
 
-using var source = new MemoryMappedDbxSource(path);
-if (!DbxHeader.TryDetectType(source, out var type))
+try
 {
-    Console.Error.WriteLine("Not a recognized .dbx file (signature mismatch).");
+    using var source = new MemoryMappedDbxSource(path);
+    if (!DbxHeader.TryDetectType(source, out var type))
+    {
+        Console.Error.WriteLine("Not a recognized .dbx file (signature mismatch).");
+        return 2;
+    }
+
+    switch (command)
+    {
+        case "dump" when type == DbxFileType.Folder:
+            DumpFolders(source);
+            return 0;
+
+        case "dump" when type == DbxFileType.Email:
+            DumpMessages(source);
+            return 0;
+
+        case "extract" when type == DbxFileType.Email:
+            if (args.Length < 3)
+            {
+                Console.Error.WriteLine("extract requires an output directory.");
+                return 1;
+            }
+            ExtractMessages(source, args[2]);
+            return 0;
+
+        default:
+            Console.Error.WriteLine($"Command '{command}' is not supported for file type {type}.");
+            return 1;
+    }
+}
+catch (IOException ex)
+{
+    Console.Error.WriteLine($"Could not open '{path}': {ex.Message}");
     return 2;
 }
-
-switch (command)
+catch (UnauthorizedAccessException ex)
 {
-    case "dump" when type == DbxFileType.Folder:
-        DumpFolders(source);
-        return 0;
-
-    case "dump" when type == DbxFileType.Email:
-        DumpMessages(source);
-        return 0;
-
-    case "extract" when type == DbxFileType.Email:
-        if (args.Length < 3)
-        {
-            Console.Error.WriteLine("extract requires an output directory.");
-            return 1;
-        }
-        ExtractMessages(source, args[2]);
-        return 0;
-
-    default:
-        Console.Error.WriteLine($"Command '{command}' is not supported for file type {type}.");
-        return 1;
+    Console.Error.WriteLine($"Could not open '{path}': {ex.Message}");
+    return 2;
 }
 
 static void DumpFolders(IDbxByteSource src)
