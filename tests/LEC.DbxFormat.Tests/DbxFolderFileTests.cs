@@ -47,6 +47,36 @@ public class DbxFolderFileTests
     }
 
     [Fact]
+    public void ReportsPartialHealthWhenHeaderItemCountDoesNotMatchTheTreeYield()
+    {
+        // The header's own item count is the strongest available integrity check --
+        // a file whose header claims N entries but whose index tree only yields fewer
+        // (or more) must not be reported StoreHealth.Ok.
+        var builder = new TestDbxBuilder();
+        builder.WriteHeader(DbxFileType.Folder);
+
+        int root = builder.WriteInfoNode(new[]
+        {
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxFolderFieldId.FolderId, Direct = true, DirectValue = 1 },
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxFolderFieldId.Name, Data = Encoding.ASCII.GetBytes("Pastas locais\0") },
+        });
+
+        // Only one real entry is wired into the index tree...
+        int rootIndexOffset = builder.WriteIndexNode(
+            nextTable: 0, ptrCount: 1, indexCount: 0,
+            entries: new[] { (indexPtr: root, entryNextTable: 0, entryIndexCount: 0) });
+
+        // ...but the header claims 5.
+        builder.SetInt32At(DbxFormat.HeaderItemCountOffset, 5);
+        builder.SetInt32At(DbxFormat.HeaderIndexPointerOffset, rootIndexOffset);
+
+        using var file = DbxFolderFile.OpenFrom(new ByteArrayDbxSource(builder.ToArray()), ownsSource: true);
+
+        Assert.Equal(StoreHealth.Partial, file.Health);
+        Assert.Single(file.Folders);
+    }
+
+    [Fact]
     public void ReportsCorruptHealthWhenTheHeaderIsTruncated()
     {
         // Valid Folder signature (first 16 bytes) but far shorter than the 232-byte
