@@ -44,12 +44,7 @@ try
             return 1;
     }
 }
-catch (IOException ex)
-{
-    Console.Error.WriteLine($"Could not open '{path}': {ex.Message}");
-    return 2;
-}
-catch (UnauthorizedAccessException ex)
+catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
 {
     Console.Error.WriteLine($"Could not open '{path}': {ex.Message}");
     return 2;
