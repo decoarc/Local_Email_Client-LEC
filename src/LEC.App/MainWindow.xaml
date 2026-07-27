@@ -8,6 +8,8 @@
     <Window.Resources>
         <conv:LoadableToBrushConverter x:Key="LoadableToBrushConverter"/>
         <conv:SpecialToFontWeightConverter x:Key="SpecialToFontWeightConverter"/>
+        <conv:HealthToVisibilityConverter x:Key="HealthToVisibilityConverter"/>
+        <conv:NotLoadableTooltipConverter x:Key="NotLoadableTooltipConverter"/>
     </Window.Resources>
     <DockPanel>
         <Menu DockPanel.Dock="Top">
@@ -32,7 +34,8 @@
                     <HierarchicalDataTemplate ItemsSource="{Binding Children}">
                         <TextBlock Text="{Binding DisplayName}"
                                    Foreground="{Binding IsLoadable, Converter={StaticResource LoadableToBrushConverter}}"
-                                   FontWeight="{Binding IsSpecial, Converter={StaticResource SpecialToFontWeightConverter}}"/>
+                                   FontWeight="{Binding IsSpecial, Converter={StaticResource SpecialToFontWeightConverter}}"
+                                   ToolTip="{Binding IsLoadable, Converter={StaticResource NotLoadableTooltipConverter}}"/>
                     </HierarchicalDataTemplate>
                 </TreeView.ItemTemplate>
             </TreeView>
@@ -53,6 +56,15 @@
                           VirtualizingPanel.VirtualizationMode="Recycling">
                     <ListView.View>
                         <GridView>
+                            <GridViewColumn Header="!" Width="24">
+                                <GridViewColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Health, StringFormat={}{0}}"
+                                                   Visibility="{Binding Health, Converter={StaticResource HealthToVisibilityConverter}}"
+                                                   Foreground="DarkOrange" FontWeight="Bold" ToolTip="Mensagem com atributo fora do intervalo esperado — dado parcialmente recuperado."/>
+                                    </DataTemplate>
+                                </GridViewColumn.CellTemplate>
+                            </GridViewColumn>
                             <GridViewColumn Header="De" DisplayMemberBinding="{Binding SenderName}" Width="200"/>
                             <GridViewColumn Header="Assunto" DisplayMemberBinding="{Binding Subject}" Width="350"/>
                             <GridViewColumn Header="Data" DisplayMemberBinding="{Binding Date}" Width="140"/>
