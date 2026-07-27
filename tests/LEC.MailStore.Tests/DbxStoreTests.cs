@@ -192,4 +192,55 @@ public class DbxStoreTests
 
         Assert.Empty(headers); // degrades silently rather than throwing
     }
+
+    [Fact]
+    public async Task OpenMessageAsyncReturnsTheRawReassembledBytes()
+    {
+        var localFolders = new TestDbxBuilder();
+        localFolders.WriteHeader(DbxFileType.Folder);
+        int inboxNode = localFolders.WriteInfoNode(new[]
+        {
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxFolderFieldId.FolderId, Direct = true, DirectValue = 1 },
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxFolderFieldId.Name, Data = "Caixa de entrada\0"u8.ToArray() },
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxFolderFieldId.FileName, Data = "Inbox.dbx\0"u8.ToArray() },
+        });
+        int foldersRoot = localFolders.WriteIndexNode(
+            nextTable: 0, ptrCount: 1, indexCount: 0,
+            entries: new[] { (indexPtr: inboxNode, entryNextTable: 0, entryIndexCount: 0) });
+        localFolders.SetInt32At(LEC.DbxFormat.DbxFormat.HeaderItemCountOffset, 1);
+        localFolders.SetInt32At(LEC.DbxFormat.DbxFormat.HeaderIndexPointerOffset, foldersRoot);
+
+        var inboxMessages = new TestDbxBuilder();
+        inboxMessages.WriteHeader(DbxFileType.Email);
+        byte[] body = "From: a@b.com\r\nSubject: Ola\r\n\r\nCorpo"u8.ToArray();
+        int blockOffset = inboxMessages.WriteMessageBlock(body, nextOffset: 0);
+        int messageInfoNode = inboxMessages.WriteInfoNode(new[]
+        {
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxEmailFieldId.MessageBlockOffset, Direct = true, DirectValue = (uint)blockOffset },
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxEmailFieldId.Subject, Data = "Ola\0"u8.ToArray() },
+        });
+        int messagesRoot = inboxMessages.WriteIndexNode(
+            nextTable: 0, ptrCount: 1, indexCount: 0,
+            entries: new[] { (indexPtr: messageInfoNode, entryNextTable: 0, entryIndexCount: 0) });
+        inboxMessages.SetInt32At(LEC.DbxFormat.DbxFormat.HeaderItemCountOffset, 1);
+        inboxMessages.SetInt32At(LEC.DbxFormat.DbxFormat.HeaderIndexPointerOffset, messagesRoot);
+
+        using var profile = new TestProfileBuilder();
+        profile.WriteFoldersDbx(localFolders.ToArray());
+        profile.WriteEmailDbx("Inbox.dbx", inboxMessages.ToArray());
+
+        using var store = DbxStore.Open(profile.ProfileDirectory);
+        var folder = store.Folders.Single();
+
+        MessageHeader? header = null;
+        await foreach (var h in store.EnumerateHeadersAsync(folder))
+            header = h;
+        Assert.NotNull(header);
+
+        await using var stream = await store.OpenMessageAsync(header!.Id);
+        using var reader = new StreamReader(stream);
+        string raw = await reader.ReadToEndAsync();
+
+        Assert.Equal("From: a@b.com\r\nSubject: Ola\r\n\r\nCorpo", raw);
+    }
 }

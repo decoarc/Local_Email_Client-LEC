@@ -120,8 +120,19 @@ public sealed class DbxStore : IMailStore
         }
     }
 
-    public Task<Stream> OpenMessageAsync(MessageRef id, CancellationToken ct = default) =>
-        throw new NotImplementedException("Implemented in Task 6.");
+    public Task<Stream> OpenMessageAsync(MessageRef id, CancellationToken ct = default)
+    {
+        if (!_messagesByFolder.TryGetValue(id.FolderId, out var infoByRef) ||
+            !infoByRef.TryGetValue(id, out var info) ||
+            !_openFolders.TryGetValue(id.FolderId, out var emailFile))
+        {
+            throw new InvalidOperationException(
+                $"Message {id} was not found. EnumerateHeadersAsync must be called for its folder before OpenMessageAsync.");
+        }
+
+        byte[] raw = emailFile.ReadMessageRaw(info, out _);
+        return Task.FromResult<Stream>(new MemoryStream(raw));
+    }
 
     public void Dispose()
     {
