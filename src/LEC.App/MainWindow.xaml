@@ -1,0 +1,8 @@
+<Window x:Class="LEC.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="LEC — Local Email Client" Height="720" Width="1100">
+    <Grid>
+        <TextBlock Text="LEC" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="24"/>
+    </Grid>
+</Window>
