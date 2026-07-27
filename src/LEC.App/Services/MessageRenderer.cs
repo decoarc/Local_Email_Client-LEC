@@ -3,12 +3,24 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Text;
+using System.Text.RegularExpressions;
 using MimeKit;
 
 namespace LEC.App.Services;
 
 public static class MessageRenderer
 {
+    // Matches src="cid:XXX" / src='cid:XXX' (any whitespace around '=', either quote style).
+    // MIME-generated HTML (signature-logo style embeds) reliably quotes the src attribute, so
+    // the unquoted-attribute case isn't handled -- it doesn't show up in real MimeKit/Outlook-
+    // Express-generated output and adding it would only widen the match surface for no benefit.
+    // Negative lookbehind on "src" avoids matching other attributes that merely end in
+    // "src" (e.g. "data-src", a lazy-load attribute some newsletter HTML carries alongside
+    // a real src -- rewriting that one too would be silently wrong, not just unnecessary).
+    private static readonly Regex CidImgSrcRegex = new(
+        @"(?<![\w-])src\s*=\s*(?<q>[""'])cid:(?<cid>[^""']+)\k<q>",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     // WebView2's CoreWebView2.NavigateToString throws above ~2 MB of HTML. Both fallback
     // paths below can otherwise carry an entire raw message (MIME boundaries, headers,
     // base64 attachments) into a single <pre> block -- observed against the real BCP/
@@ -36,6 +48,72 @@ public static class MessageRenderer
             ? $"\n\n[mensagem truncada para exibição — {text.Length:N0} caracteres no total]"
             : string.Empty;
         return $"<pre>{WebUtility.HtmlEncode(shown)}{WebUtility.HtmlEncode(notice)}</pre>";
+    }
+
+    // Rewrites <img src="cid:...">/<img src='cid:...'> references to inline data: URIs by
+    // matching against MimeMessage.BodyParts's ContentId. Empirically verified (real
+    // MimeKit-constructed messages, MimeMessage.WriteTo -> MimeMessage.Load round trip):
+    // MimeKit strips the angle brackets from the raw "Content-Id: <foo>" header, so a parsed
+    // MimePart.ContentId is "foo" -- the same bare form that appears after "cid:" in HTML.
+    // No bracket-stripping is needed on either side; a direct ordinal comparison is correct.
+    // Unresolved cid: references (no matching part) are left byte-for-byte untouched -- same
+    // degrade-gracefully-never-crash principle as the rest of this file.
+    private static string ResolveCidImages(string html, MimeMessage message)
+    {
+        if (html.IndexOf("cid:", StringComparison.OrdinalIgnoreCase) < 0)
+        {
+            return html;
+        }
+
+        Dictionary<string, MimePart>? partsByContentId = null;
+
+        return CidImgSrcRegex.Replace(html, match =>
+        {
+            partsByContentId ??= BuildContentIdIndex(message);
+
+            string cid = match.Groups["cid"].Value;
+            if (!partsByContentId.TryGetValue(cid, out MimePart? part))
+            {
+                return match.Value;
+            }
+
+            if (part.Content is not { } partContent)
+            {
+                // No content to inline (e.g. a MimePart with no body) -- leave untouched
+                // rather than emit a data: URI with no data.
+                return match.Value;
+            }
+
+            try
+            {
+                using var content = new MemoryStream();
+                partContent.DecodeTo(content);
+                string base64 = Convert.ToBase64String(content.ToArray());
+                string mimeType = part.ContentType.MimeType;
+                char quote = match.Groups["q"].Value[0];
+                return $"src={quote}data:{mimeType};base64,{base64}{quote}";
+            }
+            catch
+            {
+                // A malformed embedded part must never crash rendering -- same principle as
+                // the FormatException fallback elsewhere in this file for the whole message.
+                return match.Value;
+            }
+        });
+    }
+
+    private static Dictionary<string, MimePart> BuildContentIdIndex(MimeMessage message)
+    {
+        var index = new Dictionary<string, MimePart>(StringComparer.Ordinal);
+        foreach (MimeEntity entity in message.BodyParts)
+        {
+            if (entity is MimePart part && !string.IsNullOrEmpty(part.ContentId) && !index.ContainsKey(part.ContentId))
+            {
+                index[part.ContentId] = part;
+            }
+        }
+
+        return index;
     }
 
     public static async Task<RenderedMessage> RenderAsync(Stream rawMessage, CancellationToken ct = default)
@@ -70,8 +148,9 @@ public static class MessageRenderer
             return new RenderedMessage(null, null, null, fallbackHtml);
         }
 
-        string html = message.HtmlBody
-            ?? BuildFallbackHtml(message.TextBody ?? string.Empty);
+        string html = message.HtmlBody is { } htmlBody
+            ? ResolveCidImages(htmlBody, message)
+            : BuildFallbackHtml(message.TextBody ?? string.Empty);
 
         string? fromDisplay = message.From.Mailboxes.FirstOrDefault() is { } mailbox
             ? (string.IsNullOrEmpty(mailbox.Name) ? mailbox.Address : $"{mailbox.Name} <{mailbox.Address}>")
