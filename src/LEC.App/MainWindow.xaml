@@ -1,8 +1,71 @@
+<!-- src/LEC.App/MainWindow.xaml -->
 <Window x:Class="LEC.App.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+        xmlns:conv="clr-namespace:LEC.App.Converters"
         Title="LEC — Local Email Client" Height="720" Width="1100">
-    <Grid>
-        <TextBlock Text="LEC" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="24"/>
-    </Grid>
+    <Window.Resources>
+        <conv:LoadableToBrushConverter x:Key="LoadableToBrushConverter"/>
+        <conv:SpecialToFontWeightConverter x:Key="SpecialToFontWeightConverter"/>
+    </Window.Resources>
+    <DockPanel>
+        <Menu DockPanel.Dock="Top">
+            <MenuItem Header="_Arquivo">
+                <MenuItem Header="_Abrir Perfil..." Click="OpenProfile_Click"/>
+            </MenuItem>
+        </Menu>
+        <StatusBar DockPanel.Dock="Bottom">
+            <StatusBarItem Content="{Binding StatusText}"/>
+        </StatusBar>
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="220"/>
+                <ColumnDefinition Width="5"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <TreeView Grid.Column="0" x:Name="FolderTreeView"
+                      ItemsSource="{Binding FolderTree.RootNodes}"
+                      SelectedItemChanged="FolderTreeView_SelectedItemChanged">
+                <TreeView.ItemTemplate>
+                    <HierarchicalDataTemplate ItemsSource="{Binding Children}">
+                        <TextBlock Text="{Binding DisplayName}"
+                                   Foreground="{Binding IsLoadable, Converter={StaticResource LoadableToBrushConverter}}"
+                                   FontWeight="{Binding IsSpecial, Converter={StaticResource SpecialToFontWeightConverter}}"/>
+                    </HierarchicalDataTemplate>
+                </TreeView.ItemTemplate>
+            </TreeView>
+
+            <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Stretch"/>
+
+            <Grid Grid.Column="2">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="5"/>
+                    <RowDefinition Height="2*"/>
+                </Grid.RowDefinitions>
+
+                <ListView Grid.Row="0" x:Name="MessageListView"
+                          ItemsSource="{Binding MessageList.Messages}"
+                          SelectionChanged="MessageListView_SelectionChanged"
+                          VirtualizingPanel.IsVirtualizing="True"
+                          VirtualizingPanel.VirtualizationMode="Recycling">
+                    <ListView.View>
+                        <GridView>
+                            <GridViewColumn Header="De" DisplayMemberBinding="{Binding SenderName}" Width="200"/>
+                            <GridViewColumn Header="Assunto" DisplayMemberBinding="{Binding Subject}" Width="350"/>
+                            <GridViewColumn Header="Data" DisplayMemberBinding="{Binding Date}" Width="140"/>
+                        </GridView>
+                    </ListView.View>
+                </ListView>
+
+                <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch"/>
+
+                <DockPanel Grid.Row="2">
+                    <wv2:WebView2 x:Name="ReaderWebView"/>
+                </DockPanel>
+            </Grid>
+        </Grid>
+    </DockPanel>
 </Window>
