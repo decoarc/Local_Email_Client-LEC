@@ -82,4 +82,42 @@ public class MessageRendererTests
         Assert.Contains("Corpo da mensagem", rendered.Html);
         Assert.Contains("X-Symantec-Tempo limite da prote", rendered.Html);
     }
+
+    [Fact]
+    public async Task TruncatesAnOversizedNonParseableFallbackInsteadOfDumpingItAllIntoHtml()
+    {
+        // C2/I4: CoreWebView2.NavigateToString throws above ~2 MB. 142 of 143 real
+        // over-limit BCP/ messages came from this exact fallback path (unparseable
+        // headers) dumping the entire raw message -- MIME boundaries, headers, base64
+        // attachments -- into one <pre> block; worst case observed was ~11 MB. The
+        // renderer must cap its own output and say so visibly rather than truncating
+        // silently or leaving it to the caller entirely.
+        string headers = "X-Bad Header: present so MimeKit's strict parser rejects this\r\n\r\n";
+        string hugeBody = new string('A', 500_000);
+        string raw = headers + hugeBody;
+
+        var rendered = await MessageRenderer.RenderAsync(RawMessage(raw));
+
+        Assert.True(rendered.Html.Length < 300_000, $"Expected a bounded fallback, got {rendered.Html.Length} chars.");
+        Assert.Contains("truncada", rendered.Html);
+    }
+
+    [Fact]
+    public async Task TruncatesAnOversizedTextBodyFallbackInsteadOfDumpingItAllIntoHtml()
+    {
+        // Same cap applied to the "no HtmlBody, use TextBody" fallback for consistency,
+        // even though a MimeKit-parsed TextBody is normally much smaller (it excludes
+        // attachments) than the raw-bytes fallback above.
+        string hugeBody = new string('B', 500_000);
+        string raw =
+            "From: ana@example.com\r\n" +
+            "Subject: Grande\r\n" +
+            "\r\n" +
+            hugeBody;
+
+        var rendered = await MessageRenderer.RenderAsync(RawMessage(raw));
+
+        Assert.True(rendered.Html.Length < 300_000, $"Expected a bounded fallback, got {rendered.Html.Length} chars.");
+        Assert.Contains("truncada", rendered.Html);
+    }
 }

@@ -15,8 +15,11 @@ public partial class MainWindowViewModel : ObservableObject
 
     public FolderTreeViewModel FolderTree { get; } = new();
 
-    public MessageListViewModel? MessageList { get; private set; }
-    public MessageReaderViewModel? MessageReader { get; private set; }
+    [ObservableProperty]
+    private MessageListViewModel? _messageList;
+
+    [ObservableProperty]
+    private MessageReaderViewModel? _messageReader;
 
     public void OpenProfile(string profileDirectory)
     {

@@ -9,6 +9,35 @@ namespace LEC.App.Services;
 
 public static class MessageRenderer
 {
+    // WebView2's CoreWebView2.NavigateToString throws above ~2 MB of HTML. Both fallback
+    // paths below can otherwise carry an entire raw message (MIME boundaries, headers,
+    // base64 attachments) into a single <pre> block -- observed against the real BCP/
+    // profile up to ~11 MB. Cap well under the WebView2 limit and say so visibly rather
+    // than truncating silently.
+    private const int MaxFallbackBytes = 200_000;
+
+    private static string BuildFallbackHtml(byte[] raw)
+    {
+        bool truncated = raw.Length > MaxFallbackBytes;
+        string shown = truncated
+            ? Encoding.Latin1.GetString(raw, 0, MaxFallbackBytes)
+            : Encoding.Latin1.GetString(raw);
+        string notice = truncated
+            ? $"\n\n[mensagem truncada para exibição — {raw.Length:N0} bytes no total]"
+            : string.Empty;
+        return $"<pre>{WebUtility.HtmlEncode(shown)}{WebUtility.HtmlEncode(notice)}</pre>";
+    }
+
+    private static string BuildFallbackHtml(string text)
+    {
+        bool truncated = text.Length > MaxFallbackBytes;
+        string shown = truncated ? text[..MaxFallbackBytes] : text;
+        string notice = truncated
+            ? $"\n\n[mensagem truncada para exibição — {text.Length:N0} caracteres no total]"
+            : string.Empty;
+        return $"<pre>{WebUtility.HtmlEncode(shown)}{WebUtility.HtmlEncode(notice)}</pre>";
+    }
+
     public static async Task<RenderedMessage> RenderAsync(Stream rawMessage, CancellationToken ct = default)
     {
         // Buffer the raw bytes up front so a MimeKit parse failure can still fall back to
@@ -37,12 +66,12 @@ public static class MessageRenderer
 
         if (message is null)
         {
-            string fallbackHtml = $"<pre>{WebUtility.HtmlEncode(Encoding.Latin1.GetString(raw))}</pre>";
+            string fallbackHtml = BuildFallbackHtml(raw);
             return new RenderedMessage(null, null, null, fallbackHtml);
         }
 
         string html = message.HtmlBody
-            ?? $"<pre>{WebUtility.HtmlEncode(message.TextBody ?? string.Empty)}</pre>";
+            ?? BuildFallbackHtml(message.TextBody ?? string.Empty);
 
         string? fromDisplay = message.From.Mailboxes.FirstOrDefault() is { } mailbox
             ? (string.IsNullOrEmpty(mailbox.Name) ? mailbox.Address : $"{mailbox.Name} <{mailbox.Address}>")
