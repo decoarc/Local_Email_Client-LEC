@@ -243,4 +243,39 @@ public class DbxStoreTests
 
         Assert.Equal("From: a@b.com\r\nSubject: Ola\r\n\r\nCorpo", raw);
     }
+
+    private static string? FindRealFixtureDirectory()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "LEC.sln")))
+            dir = dir.Parent;
+
+        if (dir is null)
+            return null;
+
+        string candidate = Path.Combine(dir.FullName, "BCP");
+        return Directory.Exists(candidate) ? candidate : null;
+    }
+
+    [Fact]
+    public void RealFixture_OpensTheRealProfileAndFindsTheKnownOrphan()
+    {
+        string? profileDir = FindRealFixtureDirectory();
+        if (profileDir is null)
+            return; // BCP/ not present on this machine — soft skip
+
+        using var store = DbxStore.Open(profileDir);
+
+        // Independently verified in Fase 1: BCP/Folders.dbx has exactly 26 entries.
+        Assert.Equal(26, store.Folders.Count);
+
+        var orphan = store.Folders.Single(f => f.Id == 73);
+        Assert.Equal("seg", orphan.Name);
+        Assert.Equal(53, orphan.ParentId);
+        Assert.DoesNotContain(store.Folders, f => f.Id == 53); // confirms it's genuinely dangling
+
+        var inbox = store.Folders.Single(f => f.SpecialFolderKind == SpecialFolderKind.Inbox);
+        Assert.Equal("Caixa de entrada", inbox.Name);
+        Assert.True(inbox.IsLoadable);
+    }
 }
