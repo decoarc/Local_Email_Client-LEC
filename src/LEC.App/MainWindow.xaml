@@ -19,6 +19,7 @@
         </Menu>
         <StatusBar DockPanel.Dock="Bottom">
             <StatusBarItem Content="{Binding StatusText}"/>
+            <StatusBarItem Content="{Binding MessageList.StatusText}"/>
         </StatusBar>
         <Grid>
             <Grid.ColumnDefinitions>

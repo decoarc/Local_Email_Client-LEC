@@ -55,6 +55,45 @@ public class FolderTreeViewModelTests
     }
 
     [Fact]
+    public void FoldersInACycleBecomeRootNodesInsteadOfVanishingFromTheTree()
+    {
+        // Folder 1's parent is folder 2, and folder 2's parent is folder 1. Neither
+        // resolves to an actual root through the normal parent/child pass -- each looks
+        // like a perfectly valid child of the other -- so without an explicit reachability
+        // sweep both would silently disappear from RootNodes instead of surfacing as a
+        // (visibly odd, but present) folder. No such case exists in the real BCP/ fixture
+        // (26 declared, 26 reachable) -- this guards the latent failure class.
+        var folders = new[]
+        {
+            Folder(1, 2, "A"),
+            Folder(2, 1, "B"),
+        };
+
+        var vm = new FolderTreeViewModel();
+        vm.Build(folders);
+
+        Assert.Equal(2, vm.RootNodes.Count);
+        Assert.Contains(vm.RootNodes, n => n.DisplayName == "A");
+        Assert.Contains(vm.RootNodes, n => n.DisplayName == "B");
+    }
+
+    [Fact]
+    public void ASelfReferencingFolderBecomesARootNodeInsteadOfVanishing()
+    {
+        var folders = new[]
+        {
+            Folder(1, 1, "Loop"),
+            Folder(2, null, "Normal"),
+        };
+
+        var vm = new FolderTreeViewModel();
+        vm.Build(folders);
+
+        Assert.Equal(2, vm.RootNodes.Count);
+        Assert.Contains(vm.RootNodes, n => n.DisplayName == "Loop");
+    }
+
+    [Fact]
     public void FlagsSpecialFoldersButNotOrdinaryOnes()
     {
         var inbox = new StoreFolder { Id = 1, Name = "Caixa de entrada", IsLoadable = true, SpecialFolderKind = SpecialFolderKind.Inbox };

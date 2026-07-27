@@ -28,5 +28,29 @@ public partial class FolderTreeViewModel : ObservableObject
             else
                 RootNodes.Add(node);
         }
+
+        // A folder whose ParentId participates in a cycle (self-reference, or A -> B -> A)
+        // resolves successfully as a child of its cycle-mate above and never reaches
+        // RootNodes via the pass that just ran -- it isn't dropped by a crash, it's dropped
+        // by silently succeeding in the wrong way. Sweep for any node unreachable from an
+        // actual root and surface it as a root too, so a cycle degrades into "extra
+        // top-level folders" instead of "folder vanished".
+        var reached = new HashSet<int>();
+        var stack = new Stack<FolderNodeViewModel>(RootNodes);
+        while (stack.Count > 0)
+        {
+            var current = stack.Pop();
+            if (!reached.Add(current.Folder.Id))
+                continue;
+
+            foreach (var child in current.Children)
+                stack.Push(child);
+        }
+
+        foreach (var folder in folders)
+        {
+            if (!reached.Contains(folder.Id))
+                RootNodes.Add(nodesById[folder.Id]);
+        }
     }
 }
