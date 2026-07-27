@@ -357,9 +357,12 @@ Pontos que exigem cuidado:
 
 - **Lista virtualizada** de verdade — precisa aguentar centenas de milhares de itens.
 - **Corpo HTML sempre isolado:** script desligado, imagens remotas bloqueadas por padrão com barra *"Exibir imagens"*. Emails antigos são cheios de pixels de rastreamento que ainda funcionam.
+- **Imagens embutidas (`cid:`)** — anexos referenciados de dentro do próprio HTML (ex.: logo de assinatura) são resolvidos para exibição inline; diferente de imagem remota, não fazem requisição de rede.
 - **Links nunca abrem sozinhos** — sempre mostrar o destino real antes.
 - **Degradação elegante:** arquivo aberto por outro processo, mídia somente-leitura, arquivo truncado ou caminho de rede indisponível precisam virar mensagem clara, não exceção.
 - **Estado de saúde visível:** quando `Health = Parcial`, dizer isso na cara do usuário, com a oferta de varredura.
+- **Anexos visíveis e baixáveis** no painel de leitura — lista de anexos da mensagem selecionada, com opção de salvar em disco. Ainda somente-leitura: nada é escrito de volta no `.dbx`/`.pst` de origem.
+- **Múltiplos perfis abertos simultaneamente.** O usuário deve poder abrir mais de um perfil de origem ao mesmo tempo (ex.: `BCP` e `BCP2`), cada um com sua própria árvore de pastas visível lado a lado — útil para comparar e preparar consolidação antes de importar. Nesta fase (Espiar, seção 5) é **somente-leitura em ambos**: mover mensagens entre as árvores, apagar ou criar pastas exigem a biblioteca de trabalho (seção 8) — ver seção 12, Fases 4-5. A UI de múltiplos perfis é o ponto de entrada natural para esse fluxo: "mover" um item de uma árvore pra outra, na prática, importa para a biblioteca e organiza lá, nunca escrevendo no arquivo de origem (princípio da seção 2).
 
 ---
 
@@ -392,16 +395,16 @@ Pontos que exigem cuidado:
 Constantes confirmadas contra arquivo real, travessia da árvore, remontagem de mensagem, blindagem completa, testes com arquivos reais e sintéticos. Sem UI: saída em linha de comando.
 
 **Fase 2 — Visualizador.**
-Shell WPF de três painéis, `IMailStore` com `DbxStore` e `PstStore`, leitura preguiçosa, `Folders.dbx`, render HTML isolado. Só espiar, sem biblioteca.
+Shell WPF de três painéis, `IMailStore` com `DbxStore` e `PstStore`, leitura preguiçosa, `Folders.dbx`, render HTML isolado. Só espiar, sem biblioteca. Inclui imagens `cid:` embutidas (resolvidas para exibição inline), listagem/download de anexos, e abertura de múltiplos perfis simultaneamente lado a lado (ver seção 9) — tudo ainda somente-leitura.
 
 **Fase 3 — Varredura e recuperação.**
 Modo scavenge, marcadores `Recuperada` e `Fragmento`, barra de mensagens recuperáveis.
 
 **Fase 4 — Biblioteca.**
-`.lecarchive`, esquema SQLite, importação, blobs endereçados por conteúdo, proveniência, FTS5.
+`.lecarchive`, esquema SQLite, importação, blobs endereçados por conteúdo, proveniência, FTS5. É aqui que "mover" um item de um perfil aberto pra outro (visualizados lado a lado desde a Fase 2) de fato acontece: importa pra biblioteca e organiza lá, nunca escrevendo no `.dbx`/`.pst` de origem (princípio da seção 2).
 
 **Fase 5 — Reorganização.**
-Mover, mesclar, renomear, lixeira, journal de undo, compactação.
+Mover, mesclar, renomear, lixeira, journal de undo, compactação. Cobre "mover mensagem entre árvores", "apagar mensagem" e "criar pasta/subpasta" — tudo dentro da biblioteca.
 
 **Fase 6 — Deduplicação.**
 Nível 1 automático, nível 2 com revisão do usuário, regra de desempate por completude.
