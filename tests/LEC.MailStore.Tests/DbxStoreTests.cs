@@ -85,4 +85,111 @@ public class DbxStoreTests
         var orphan = store.Folders.Single();
         Assert.Equal(53, orphan.ParentId); // passed through as-is, not resolved/dropped here
     }
+
+    [Fact]
+    public async Task EnumeratesHeadersForALoadableFolder()
+    {
+        var localFolders = new TestDbxBuilder();
+        localFolders.WriteHeader(DbxFileType.Folder);
+        int inboxNode = localFolders.WriteInfoNode(new[]
+        {
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxFolderFieldId.FolderId, Direct = true, DirectValue = 1 },
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxFolderFieldId.Name, Data = "Caixa de entrada\0"u8.ToArray() },
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxFolderFieldId.FileName, Data = "Inbox.dbx\0"u8.ToArray() },
+        });
+        int foldersRoot = localFolders.WriteIndexNode(
+            nextTable: 0, ptrCount: 1, indexCount: 0,
+            entries: new[] { (indexPtr: inboxNode, entryNextTable: 0, entryIndexCount: 0) });
+        localFolders.SetInt32At(LEC.DbxFormat.DbxFormat.HeaderItemCountOffset, 1);
+        localFolders.SetInt32At(LEC.DbxFormat.DbxFormat.HeaderIndexPointerOffset, foldersRoot);
+
+        var inboxMessages = new TestDbxBuilder();
+        inboxMessages.WriteHeader(DbxFileType.Email);
+        int messageInfoNode = inboxMessages.WriteInfoNode(new[]
+        {
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxEmailFieldId.Subject, Data = "Ola\0"u8.ToArray() },
+        });
+        int messagesRoot = inboxMessages.WriteIndexNode(
+            nextTable: 0, ptrCount: 1, indexCount: 0,
+            entries: new[] { (indexPtr: messageInfoNode, entryNextTable: 0, entryIndexCount: 0) });
+        inboxMessages.SetInt32At(LEC.DbxFormat.DbxFormat.HeaderItemCountOffset, 1);
+        inboxMessages.SetInt32At(LEC.DbxFormat.DbxFormat.HeaderIndexPointerOffset, messagesRoot);
+
+        using var profile = new TestProfileBuilder();
+        profile.WriteFoldersDbx(localFolders.ToArray());
+        profile.WriteEmailDbx("Inbox.dbx", inboxMessages.ToArray());
+
+        using var store = DbxStore.Open(profile.ProfileDirectory);
+        var folder = store.Folders.Single();
+        Assert.True(folder.IsLoadable);
+
+        var headers = new List<MessageHeader>();
+        await foreach (var header in store.EnumerateHeadersAsync(folder))
+            headers.Add(header);
+
+        Assert.Single(headers);
+        Assert.Equal("Ola", headers[0].Subject);
+        Assert.Equal(folder.Id, headers[0].Id.FolderId);
+    }
+
+    [Fact]
+    public async Task EnumerateHeadersReturnsEmptyForAFolderWithNoBackingFile()
+    {
+        var localFolders = new TestDbxBuilder();
+        localFolders.WriteHeader(DbxFileType.Folder);
+        int node = localFolders.WriteInfoNode(new[]
+        {
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxFolderFieldId.FolderId, Direct = true, DirectValue = 1 },
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxFolderFieldId.Name, Data = "Pastas locais\0"u8.ToArray() },
+        });
+        int root = localFolders.WriteIndexNode(
+            nextTable: 0, ptrCount: 1, indexCount: 0,
+            entries: new[] { (indexPtr: node, entryNextTable: 0, entryIndexCount: 0) });
+        localFolders.SetInt32At(LEC.DbxFormat.DbxFormat.HeaderItemCountOffset, 1);
+        localFolders.SetInt32At(LEC.DbxFormat.DbxFormat.HeaderIndexPointerOffset, root);
+
+        using var profile = new TestProfileBuilder();
+        profile.WriteFoldersDbx(localFolders.ToArray());
+
+        using var store = DbxStore.Open(profile.ProfileDirectory);
+        var folder = store.Folders.Single();
+
+        var headers = new List<MessageHeader>();
+        await foreach (var header in store.EnumerateHeadersAsync(folder))
+            headers.Add(header);
+
+        Assert.Empty(headers);
+    }
+
+    [Fact]
+    public async Task EnumerateHeadersReturnsEmptyWhenTheBackingFileExistsButIsNotAValidDbx()
+    {
+        var localFolders = new TestDbxBuilder();
+        localFolders.WriteHeader(DbxFileType.Folder);
+        int node = localFolders.WriteInfoNode(new[]
+        {
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxFolderFieldId.FolderId, Direct = true, DirectValue = 1 },
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxFolderFieldId.Name, Data = "Quebrada\0"u8.ToArray() },
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxFolderFieldId.FileName, Data = "Quebrada.dbx\0"u8.ToArray() },
+        });
+        int root = localFolders.WriteIndexNode(
+            nextTable: 0, ptrCount: 1, indexCount: 0,
+            entries: new[] { (indexPtr: node, entryNextTable: 0, entryIndexCount: 0) });
+        localFolders.SetInt32At(LEC.DbxFormat.DbxFormat.HeaderItemCountOffset, 1);
+        localFolders.SetInt32At(LEC.DbxFormat.DbxFormat.HeaderIndexPointerOffset, root);
+
+        using var profile = new TestProfileBuilder();
+        profile.WriteFoldersDbx(localFolders.ToArray());
+        profile.WriteEmailDbx("Quebrada.dbx", new byte[64]); // exists, but not a valid .dbx signature
+
+        using var store = DbxStore.Open(profile.ProfileDirectory);
+        var folder = store.Folders.Single();
+        Assert.True(folder.IsLoadable); // file exists — the cheap upfront check can't know it's garbage
+
+        var headers = new List<MessageHeader>();
+        await foreach (var header in store.EnumerateHeadersAsync(folder))
+            headers.Add(header);
+
+        Assert.Empty(headers); // degrades silently rather than throwing
+    }
 }

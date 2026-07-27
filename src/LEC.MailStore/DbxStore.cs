@@ -64,8 +64,61 @@ public sealed class DbxStore : IMailStore
         _ => SpecialFolderKind.None,
     };
 
-    public IAsyncEnumerable<MessageHeader> EnumerateHeadersAsync(StoreFolder folder, [EnumeratorCancellation] CancellationToken ct = default) =>
-        throw new NotImplementedException("Implemented in Task 5.");
+    public async IAsyncEnumerable<MessageHeader> EnumerateHeadersAsync(StoreFolder folder, [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        if (!_backingFileNames.TryGetValue(folder.Id, out var fileName) || fileName is null)
+            yield break;
+
+        if (!_openFolders.TryGetValue(folder.Id, out var emailFile))
+        {
+            var opened = TryOpenFolderFile(fileName);
+            if (opened is null)
+                yield break;
+
+            emailFile = opened;
+            _openFolders[folder.Id] = emailFile;
+        }
+
+        if (!_messagesByFolder.TryGetValue(folder.Id, out var infoByRef))
+        {
+            infoByRef = new Dictionary<MessageRef, DbxMessageInfo>();
+            _messagesByFolder[folder.Id] = infoByRef;
+        }
+
+        foreach (var info in emailFile.Messages)
+        {
+            ct.ThrowIfCancellationRequested();
+            var reference = new MessageRef(folder.Id, info.IndexNodeOffset);
+            infoByRef[reference] = info;
+
+            yield return new MessageHeader
+            {
+                Id = reference,
+                Subject = info.Subject,
+                SenderName = info.SenderName,
+                SenderAddress = info.SenderAddress,
+                Date = info.SendTimeUtc ?? info.ReceiveTimeUtc,
+                Size = info.MessageSize,
+                MessageId = info.MessageId,
+                Health = info.HasOutOfRangeAttribute ? StoreHealth.Partial : StoreHealth.Ok,
+            };
+        }
+
+        await Task.CompletedTask; // keeps this an async iterator per IMailStore's contract
+    }
+
+    private DbxEmailFile? TryOpenFolderFile(string fileName)
+    {
+        string path = Path.Combine(_profileDirectory, fileName);
+        try
+        {
+            return DbxEmailFile.Open(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or DbxFormatException)
+        {
+            return null;
+        }
+    }
 
     public Task<Stream> OpenMessageAsync(MessageRef id, CancellationToken ct = default) =>
         throw new NotImplementedException("Implemented in Task 6.");
