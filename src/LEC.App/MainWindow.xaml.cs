@@ -10,11 +10,43 @@ namespace LEC.App;
 public partial class MainWindow : Window
 {
     private readonly MainWindowViewModel _viewModel = new();
+    private LEC.App.Services.ImageBlockingWebView2Handler? _imageBlocker;
 
     public MainWindow()
     {
         InitializeComponent();
         DataContext = _viewModel;
+        Loaded += MainWindow_Loaded;
+    }
+
+    private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
+    {
+        await ReaderWebView.EnsureCoreWebView2Async();
+        _imageBlocker = new LEC.App.Services.ImageBlockingWebView2Handler(ReaderWebView.CoreWebView2);
+        ReaderWebView.CoreWebView2.NavigationStarting += CoreWebView2_NavigationStarting;
+    }
+
+    private void CoreWebView2_NavigationStarting(object? sender, Microsoft.Web.WebView2.Core.CoreWebView2NavigationStartingEventArgs e)
+    {
+        // NavigateToString's own content loads through a data: URI — never intercept that.
+        if (e.Uri.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        e.Cancel = true;
+        var result = MessageBox.Show($"Abrir este link no navegador?\n\n{e.Uri}", "Confirmar link",
+            MessageBoxButton.YesNo, MessageBoxImage.Question);
+        if (result == MessageBoxResult.Yes)
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(e.Uri) { UseShellExecute = true });
+    }
+
+    private void ShowImages_Click(object sender, RoutedEventArgs e)
+    {
+        if (_imageBlocker is null)
+            return;
+
+        _imageBlocker.BlockImages = false;
+        ImagesBlockedBar.Visibility = Visibility.Collapsed;
+        ReaderWebView.Reload();
     }
 
     private void OpenProfile_Click(object sender, RoutedEventArgs e)
@@ -34,6 +66,12 @@ public partial class MainWindow : Window
     {
         if (MessageListView.SelectedItem is MessageHeader header)
         {
+            if (_imageBlocker is not null)
+            {
+                _imageBlocker.BlockImages = true;
+                ImagesBlockedBar.Visibility = Visibility.Visible;
+            }
+
             await _viewModel.SelectMessageAsync(header);
             if (_viewModel.MessageReader?.Current is { } rendered)
                 ReaderWebView.NavigateToString(rendered.Html);
