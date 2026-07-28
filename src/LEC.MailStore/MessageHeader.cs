@@ -12,4 +12,5 @@ public sealed class MessageHeader
     public uint Size { get; init; }
     public string? MessageId { get; init; }
     public StoreHealth Health { get; init; }
+    public RecoveredMessageKind? RecoveredKind { get; init; } // null = normal, index-backed message
 }

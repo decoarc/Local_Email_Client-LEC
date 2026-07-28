@@ -158,4 +158,54 @@ public class DbxStoreScavengeTests
         var status = store.GetScavengeStatus(folder);
         Assert.True(status.IsVisible);
     }
+
+    [Fact]
+    public async Task RecoveredItemsAppearInEnumerateHeadersOnlyWhenVisible()
+    {
+        var localFolders = new TestDbxBuilder();
+        localFolders.WriteHeader(DbxFileType.Folder);
+        int inboxNode = localFolders.WriteInfoNode(new[]
+        {
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxFolderFieldId.FolderId, Direct = true, DirectValue = 1 },
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxFolderFieldId.Name, Data = "Caixa de entrada\0"u8.ToArray() },
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxFolderFieldId.FileName, Data = "Inbox.dbx\0"u8.ToArray() },
+        });
+        int foldersRoot = localFolders.WriteIndexNode(nextTable: 0, ptrCount: 1, indexCount: 0,
+            entries: new[] { (indexPtr: inboxNode, entryNextTable: 0, entryIndexCount: 0) });
+        localFolders.SetInt32At(LEC.DbxFormat.DbxFormat.HeaderItemCountOffset, 1);
+        localFolders.SetInt32At(LEC.DbxFormat.DbxFormat.HeaderIndexPointerOffset, foldersRoot);
+
+        var inbox = new TestDbxBuilder();
+        inbox.WriteHeader(DbxFileType.Email);
+        inbox.SetInt32At(LEC.DbxFormat.DbxFormat.HeaderItemCountOffset, 0);
+        inbox.SetInt32At(LEC.DbxFormat.DbxFormat.HeaderIndexPointerOffset, 0);
+        byte[] payload = "From: c@d.com\r\nSubject: Orfa\r\n\r\nCorpo"u8.ToArray();
+        inbox.WriteMessageBlock(payload, nextOffset: 0);
+
+        string profileDir = TestProfileBuilder.WriteProfile(("Folders.dbx", localFolders), ("Inbox.dbx", inbox));
+        string cachePath = Path.Combine(Path.GetTempPath(), $"lec-test-cache-{Guid.NewGuid():N}.db");
+
+        using var store = DbxStore.Open(profileDir, cachePath);
+        var folder = store.Folders.Single(f => f.Name == "Caixa de entrada");
+        await store.ScavengeAsync(folder);
+
+        var beforeShown = new List<MessageHeader>();
+        await foreach (var h in store.EnumerateHeadersAsync(folder))
+            beforeShown.Add(h);
+        Assert.Empty(beforeShown); // scavenged but not shown yet
+
+        store.SetScavengeVisibility(folder, visible: true);
+
+        var afterShown = new List<MessageHeader>();
+        await foreach (var h in store.EnumerateHeadersAsync(folder))
+            afterShown.Add(h);
+        var recovered = Assert.Single(afterShown);
+        Assert.NotNull(recovered.RecoveredKind);
+        Assert.Equal("Orfa", recovered.Subject);
+
+        using var stream = await store.OpenMessageAsync(recovered.Id);
+        using var reader = new StreamReader(stream);
+        string raw = await reader.ReadToEndAsync();
+        Assert.Contains("Corpo", raw);
+    }
 }

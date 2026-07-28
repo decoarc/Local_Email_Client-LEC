@@ -15,6 +15,7 @@ public sealed class DbxStore : IMailStore
     private readonly ScavengeCache _scavengeCache;
     private readonly Dictionary<int, ScavengeStatus> _scavengeStatusByFolder = new();
     private readonly Dictionary<int, IReadOnlyList<CachedRecoveredItem>> _recoveredItemsByFolder = new();
+    private readonly Dictionary<int, Dictionary<MessageRef, int>> _recoveredByFolder = new();
 
     public IReadOnlyList<StoreFolder> Folders { get; }
     public StoreHealth Health { get; }
@@ -122,6 +123,42 @@ public sealed class DbxStore : IMailStore
             };
         }
 
+        EnsureScavengeLoaded(folder);
+        if (_scavengeStatusByFolder.TryGetValue(folder.Id, out var status) && status.IsVisible
+            && _recoveredItemsByFolder.TryGetValue(folder.Id, out var recoveredItems))
+        {
+            if (!_recoveredByFolder.TryGetValue(folder.Id, out var offsetByRef))
+            {
+                offsetByRef = new Dictionary<MessageRef, int>();
+                _recoveredByFolder[folder.Id] = offsetByRef;
+            }
+
+            foreach (var item in recoveredItems)
+            {
+                ct.ThrowIfCancellationRequested();
+                // ChainOffset re-purposes MessageRef's IndexNodeOffset slot as an opaque
+                // "wherever this is in the file" identifier -- a recovered item has no real
+                // index node (that's exactly what the tree lost), but the two are always in
+                // disjoint byte regions of the file (index/info-node region vs. data-block
+                // region) so collisions are not a practical concern.
+                var reference = new MessageRef(folder.Id, item.ChainOffset);
+                offsetByRef[reference] = item.ChainOffset;
+
+                yield return new MessageHeader
+                {
+                    Id = reference,
+                    Subject = item.Subject,
+                    SenderName = item.SenderName,
+                    SenderAddress = item.SenderAddress,
+                    Date = item.DateUtc,
+                    Size = (uint)Math.Max(0, item.ByteLength),
+                    MessageId = null,
+                    Health = StoreHealth.Partial,
+                    RecoveredKind = item.Kind,
+                };
+            }
+        }
+
         await Task.CompletedTask; // keeps this an async iterator per IMailStore's contract
     }
 
@@ -217,16 +254,24 @@ public sealed class DbxStore : IMailStore
 
     public Task<Stream> OpenMessageAsync(MessageRef id, CancellationToken ct = default)
     {
-        if (!_messagesByFolder.TryGetValue(id.FolderId, out var infoByRef) ||
-            !infoByRef.TryGetValue(id, out var info) ||
-            !_openFolders.TryGetValue(id.FolderId, out var emailFile))
+        if (_messagesByFolder.TryGetValue(id.FolderId, out var infoByRef) &&
+            infoByRef.TryGetValue(id, out var info) &&
+            _openFolders.TryGetValue(id.FolderId, out var normalEmailFile))
         {
-            throw new InvalidOperationException(
-                $"Message {id} was not found. EnumerateHeadersAsync must be called for its folder before OpenMessageAsync.");
+            byte[] normalRaw = normalEmailFile.ReadMessageRaw(info, out _);
+            return Task.FromResult<Stream>(new MemoryStream(normalRaw));
         }
 
-        byte[] raw = emailFile.ReadMessageRaw(info, out _);
-        return Task.FromResult<Stream>(new MemoryStream(raw));
+        if (_recoveredByFolder.TryGetValue(id.FolderId, out var offsetByRef) &&
+            offsetByRef.TryGetValue(id, out var chainOffset) &&
+            _openFolders.TryGetValue(id.FolderId, out var recoveredEmailFile))
+        {
+            byte[] recoveredRaw = recoveredEmailFile.ReadRecoveredMessageRaw(chainOffset, out _);
+            return Task.FromResult<Stream>(new MemoryStream(recoveredRaw));
+        }
+
+        throw new InvalidOperationException(
+            $"Message {id} was not found. EnumerateHeadersAsync must be called for its folder before OpenMessageAsync.");
     }
 
     public void Dispose()
