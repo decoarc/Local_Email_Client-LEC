@@ -2,7 +2,11 @@ using LEC.DbxFormat;
 
 namespace LEC.MailStore;
 
-/// <summary>Contract fixed by ARQUITETURA.md §7.1 — do not add members here.</summary>
+/// <summary>
+/// Core contract from ARQUITETURA.md §7.1. Extended in Fase 3 (varredura) with
+/// scavenge-related members -- the Fase 2 plan's "don't add members" was scoped to
+/// that plan, not a permanent freeze. See docs/superpowers/specs/2026-07-27-fase3-varredura-design.md §4.
+/// </summary>
 public interface IMailStore : IDisposable
 {
     IReadOnlyList<StoreFolder> Folders { get; }
@@ -12,4 +16,30 @@ public interface IMailStore : IDisposable
     Task<Stream> OpenMessageAsync(MessageRef id, CancellationToken ct = default);
 
     StoreHealth Health { get; }
+
+    /// <summary>
+    /// This specific folder's own backing-file health (distinct from the aggregate
+    /// <see cref="Health"/>, which only reflects Folders.dbx). Opens the folder if it
+    /// isn't already open (same lazy-open behavior as EnumerateHeadersAsync); returns
+    /// StoreHealth.Ok if the folder can't be opened at all (IsLoadable already covers
+    /// that failure mode separately). This is the correct signal for "does this folder
+    /// have an inconsistency scavenging might help with" -- a per-message Health.Partial
+    /// only catches one specific corruption shape (an out-of-range attribute pointer on
+    /// an already-indexed message); an orphaned block coexisting with perfectly healthy
+    /// indexed messages -- the scenario ARQUITETURA.md §7.5 exists for -- never sets any
+    /// message's Health to Partial, but does set the file's own DbxEmailFile.Health.
+    /// </summary>
+    StoreHealth GetFolderHealth(StoreFolder folder);
+
+    /// <summary>Current scavenge status for a folder -- reads the cache, runs nothing.</summary>
+    ScavengeStatus GetScavengeStatus(StoreFolder folder);
+
+    /// <summary>
+    /// Runs the scavenge scan for a folder and persists the result. Never automatic --
+    /// only ever called in direct response to an explicit user action (ARQUITETURA.md §7.4).
+    /// </summary>
+    Task<ScavengeStatus> ScavengeAsync(StoreFolder folder, IProgress<double>? progress = null, CancellationToken ct = default);
+
+    /// <summary>Toggles whether a folder's already-scavenged items appear in EnumerateHeadersAsync.</summary>
+    void SetScavengeVisibility(StoreFolder folder, bool visible);
 }

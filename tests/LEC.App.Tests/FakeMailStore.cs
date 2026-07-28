@@ -42,5 +42,14 @@ internal sealed class FakeMailStore : IMailStore
         return Task.FromResult<Stream>(new MemoryStream(raw));
     }
 
+    public StoreHealth GetFolderHealth(StoreFolder folder) => StoreHealth.Ok;
+
+    public ScavengeStatus GetScavengeStatus(StoreFolder folder) => ScavengeStatus.NotScanned;
+
+    public Task<ScavengeStatus> ScavengeAsync(StoreFolder folder, IProgress<double>? progress = null, CancellationToken ct = default) =>
+        Task.FromResult(ScavengeStatus.NotScanned);
+
+    public void SetScavengeVisibility(StoreFolder folder, bool visible) { }
+
     public void Dispose() { }
 }

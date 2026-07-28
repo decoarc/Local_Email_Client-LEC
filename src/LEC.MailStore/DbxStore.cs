@@ -1,6 +1,8 @@
 // src/LEC.MailStore/DbxStore.cs
+using System.Linq;
 using System.Runtime.CompilerServices;
 using LEC.DbxFormat;
+using Microsoft.Data.Sqlite;
 
 namespace LEC.MailStore;
 
@@ -10,19 +12,23 @@ public sealed class DbxStore : IMailStore
     private readonly Dictionary<int, string?> _backingFileNames;
     private readonly Dictionary<int, DbxEmailFile> _openFolders = new();
     private readonly Dictionary<int, Dictionary<MessageRef, DbxMessageInfo>> _messagesByFolder = new();
+    private readonly ScavengeCache _scavengeCache;
+    private readonly Dictionary<int, ScavengeStatus> _scavengeStatusByFolder = new();
+    private readonly Dictionary<int, IReadOnlyList<CachedRecoveredItem>> _recoveredItemsByFolder = new();
 
     public IReadOnlyList<StoreFolder> Folders { get; }
     public StoreHealth Health { get; }
 
-    private DbxStore(string profileDirectory, IReadOnlyList<StoreFolder> folders, Dictionary<int, string?> backingFileNames, StoreHealth health)
+    private DbxStore(string profileDirectory, IReadOnlyList<StoreFolder> folders, Dictionary<int, string?> backingFileNames, StoreHealth health, ScavengeCache scavengeCache)
     {
         _profileDirectory = profileDirectory;
         Folders = folders;
         _backingFileNames = backingFileNames;
         Health = health;
+        _scavengeCache = scavengeCache;
     }
 
-    public static DbxStore Open(string profileDirectoryPath)
+    public static DbxStore Open(string profileDirectoryPath, string? scavengeCacheDatabasePath = null)
     {
         string foldersDbxPath = Path.Combine(profileDirectoryPath, "Folders.dbx");
         using var folderFile = DbxFolderFile.Open(foldersDbxPath);
@@ -51,7 +57,28 @@ public sealed class DbxStore : IMailStore
         }
 
         var health = folderFile.Health; // read before the `using` disposes folderFile below
-        return new DbxStore(profileDirectoryPath, folders, backingFileNames, health);
+        var scavengeCache = OpenScavengeCacheWithFallback(scavengeCacheDatabasePath ?? ScavengeCache.DefaultDatabasePath);
+        return new DbxStore(profileDirectoryPath, folders, backingFileNames, health, scavengeCache);
+    }
+
+    // Global Constraint (design §8): cache unavailable (AppData not writable, disk full,
+    // locked by another instance) must not block the app -- scavenging still works for
+    // this session, it just won't survive a restart. SQLite's ":memory:" database is a
+    // real, fully-functional SqliteConnection with the exact same schema/API, so falling
+    // back to it needs no separate no-op/null implementation of ScavengeCache.
+    private static ScavengeCache OpenScavengeCacheWithFallback(string databasePath)
+    {
+        try
+        {
+            return new ScavengeCache(databasePath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SqliteException)
+        {
+            // ScavengeCache's constructor wraps whatever path it's given as
+            // "Data Source={path}" -- ":memory:" is itself a complete, valid connection
+            // string value for SQLite's in-memory mode, so pass it bare, not pre-wrapped.
+            return new ScavengeCache(":memory:");
+        }
     }
 
     private static SpecialFolderKind ToSpecialFolderKind(DbxSpecialFolderType type) => type switch
@@ -66,18 +93,9 @@ public sealed class DbxStore : IMailStore
 
     public async IAsyncEnumerable<MessageHeader> EnumerateHeadersAsync(StoreFolder folder, [EnumeratorCancellation] CancellationToken ct = default)
     {
-        if (!_backingFileNames.TryGetValue(folder.Id, out var fileName) || fileName is null)
+        var emailFile = EnsureFolderOpen(folder);
+        if (emailFile is null)
             yield break;
-
-        if (!_openFolders.TryGetValue(folder.Id, out var emailFile))
-        {
-            var opened = TryOpenFolderFile(fileName);
-            if (opened is null)
-                yield break;
-
-            emailFile = opened;
-            _openFolders[folder.Id] = emailFile;
-        }
 
         if (!_messagesByFolder.TryGetValue(folder.Id, out var infoByRef))
         {
@@ -105,6 +123,83 @@ public sealed class DbxStore : IMailStore
         }
 
         await Task.CompletedTask; // keeps this an async iterator per IMailStore's contract
+    }
+
+    private DbxEmailFile? EnsureFolderOpen(StoreFolder folder)
+    {
+        if (_openFolders.TryGetValue(folder.Id, out var emailFile))
+            return emailFile;
+
+        if (!_backingFileNames.TryGetValue(folder.Id, out var fileName) || fileName is null)
+            return null;
+
+        var opened = TryOpenFolderFile(fileName);
+        if (opened is null)
+            return null;
+
+        _openFolders[folder.Id] = opened;
+        return opened;
+    }
+
+    public StoreHealth GetFolderHealth(StoreFolder folder) => EnsureFolderOpen(folder)?.Health ?? StoreHealth.Ok;
+
+    public ScavengeStatus GetScavengeStatus(StoreFolder folder)
+    {
+        EnsureScavengeLoaded(folder);
+        return _scavengeStatusByFolder.TryGetValue(folder.Id, out var status) ? status : ScavengeStatus.NotScanned;
+    }
+
+    public async Task<ScavengeStatus> ScavengeAsync(StoreFolder folder, IProgress<double>? progress = null, CancellationToken ct = default)
+    {
+        if (!_backingFileNames.TryGetValue(folder.Id, out var fileName) || fileName is null)
+            return ScavengeStatus.NotScanned;
+
+        var emailFile = EnsureFolderOpen(folder);
+        if (emailFile is null)
+            return ScavengeStatus.NotScanned;
+
+        var scavenged = await Task.Run(() => emailFile.Scavenge(progress, ct), ct);
+        var classified = scavenged.Select(ScavengedMessageClassifier.Classify).ToList();
+
+        _scavengeCache.SaveScan(_profileDirectory, fileName, classified);
+        _recoveredItemsByFolder[folder.Id] = classified;
+
+        var status = new ScavengeStatus(ScavengeState.Scanned, classified.Count, IsVisible: false);
+        _scavengeStatusByFolder[folder.Id] = status;
+        return status;
+    }
+
+    public void SetScavengeVisibility(StoreFolder folder, bool visible)
+    {
+        if (!_backingFileNames.TryGetValue(folder.Id, out var fileName) || fileName is null)
+            return;
+
+        _scavengeCache.SetVisibility(_profileDirectory, fileName, visible);
+
+        if (_scavengeStatusByFolder.TryGetValue(folder.Id, out var status))
+            _scavengeStatusByFolder[folder.Id] = status with { IsVisible = visible };
+    }
+
+    private void EnsureScavengeLoaded(StoreFolder folder)
+    {
+        if (_scavengeStatusByFolder.ContainsKey(folder.Id))
+            return;
+
+        if (!_backingFileNames.TryGetValue(folder.Id, out var fileName) || fileName is null)
+        {
+            _scavengeStatusByFolder[folder.Id] = ScavengeStatus.NotScanned;
+            return;
+        }
+
+        var cached = _scavengeCache.GetScan(_profileDirectory, fileName);
+        if (cached is null)
+        {
+            _scavengeStatusByFolder[folder.Id] = ScavengeStatus.NotScanned;
+            return;
+        }
+
+        _recoveredItemsByFolder[folder.Id] = cached.Items;
+        _scavengeStatusByFolder[folder.Id] = new ScavengeStatus(ScavengeState.Scanned, cached.Items.Count, cached.IsVisible);
     }
 
     private DbxEmailFile? TryOpenFolderFile(string fileName)
@@ -139,5 +234,6 @@ public sealed class DbxStore : IMailStore
         foreach (var file in _openFolders.Values)
             file.Dispose();
         _openFolders.Clear();
+        _scavengeCache.Dispose();
     }
 }
