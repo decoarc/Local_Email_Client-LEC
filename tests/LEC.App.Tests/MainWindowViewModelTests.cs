@@ -28,4 +28,17 @@ public class MainWindowViewModelTests
 
         Assert.Null(vm.MessageList);
     }
+
+    [Fact]
+    public void CurrentFolderScavengeStatusStartsNullWhenNoProfileIsOpen()
+    {
+        // MainWindowViewModel.OpenProfile takes a real profile *directory path*, not an
+        // IMailStore -- there's no seam to inject FakeMailStore here at the OpenProfile
+        // level (same constraint every existing MainWindowViewModel test already works
+        // within). The underlying DbxStore scavenge behavior is already covered directly
+        // by DbxStoreScavengeTests; this only checks the no-profile-open state.
+        var vm = new MainWindowViewModel();
+
+        Assert.Null(vm.CurrentFolderScavengeStatus);
+    }
 }

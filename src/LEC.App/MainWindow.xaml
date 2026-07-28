@@ -50,28 +50,36 @@
                     <RowDefinition Height="2*"/>
                 </Grid.RowDefinitions>
 
-                <ListView Grid.Row="0" x:Name="MessageListView"
-                          ItemsSource="{Binding MessageList.Messages}"
-                          SelectionChanged="MessageListView_SelectionChanged"
-                          VirtualizingPanel.IsVirtualizing="True"
-                          VirtualizingPanel.VirtualizationMode="Recycling">
-                    <ListView.View>
-                        <GridView>
-                            <GridViewColumn Header="!" Width="24">
-                                <GridViewColumn.CellTemplate>
-                                    <DataTemplate>
-                                        <TextBlock Text="{Binding Health, StringFormat={}{0}}"
-                                                   Visibility="{Binding Health, Converter={StaticResource HealthToVisibilityConverter}}"
-                                                   Foreground="DarkOrange" FontWeight="Bold" ToolTip="Mensagem com atributo fora do intervalo esperado — dado parcialmente recuperado."/>
-                                    </DataTemplate>
-                                </GridViewColumn.CellTemplate>
-                            </GridViewColumn>
-                            <GridViewColumn Header="De" DisplayMemberBinding="{Binding SenderName}" Width="200"/>
-                            <GridViewColumn Header="Assunto" DisplayMemberBinding="{Binding Subject}" Width="350"/>
-                            <GridViewColumn Header="Data" DisplayMemberBinding="{Binding Date}" Width="140"/>
-                        </GridView>
-                    </ListView.View>
-                </ListView>
+                <DockPanel Grid.Row="0">
+                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="4">
+                        <Button x:Name="ScavengeButton" Content="Procurar mensagens recuperáveis nesta pasta"
+                                Click="ScavengeButton_Click" Visibility="Collapsed"/>
+                        <Button x:Name="CancelScavengeButton" Content="Cancelar" Margin="8,0,0,0"
+                                Click="CancelScavengeButton_Click" Visibility="Collapsed"/>
+                    </StackPanel>
+                    <ListView x:Name="MessageListView"
+                              ItemsSource="{Binding MessageList.Messages}"
+                              SelectionChanged="MessageListView_SelectionChanged"
+                              VirtualizingPanel.IsVirtualizing="True"
+                              VirtualizingPanel.VirtualizationMode="Recycling">
+                        <ListView.View>
+                            <GridView>
+                                <GridViewColumn Header="!" Width="24">
+                                    <GridViewColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding Health, StringFormat={}{0}}"
+                                                       Visibility="{Binding Health, Converter={StaticResource HealthToVisibilityConverter}}"
+                                                       Foreground="DarkOrange" FontWeight="Bold" ToolTip="Mensagem com atributo fora do intervalo esperado — dado parcialmente recuperado."/>
+                                        </DataTemplate>
+                                    </GridViewColumn.CellTemplate>
+                                </GridViewColumn>
+                                <GridViewColumn Header="De" DisplayMemberBinding="{Binding SenderName}" Width="200"/>
+                                <GridViewColumn Header="Assunto" DisplayMemberBinding="{Binding Subject}" Width="350"/>
+                                <GridViewColumn Header="Data" DisplayMemberBinding="{Binding Date}" Width="140"/>
+                            </GridView>
+                        </ListView.View>
+                    </ListView>
+                </DockPanel>
 
                 <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch"/>
 

@@ -21,6 +21,9 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty]
     private MessageReaderViewModel? _messageReader;
 
+    [ObservableProperty]
+    private ScavengeStatus? _currentFolderScavengeStatus;
+
     public void OpenProfile(string profileDirectory)
     {
         try
@@ -44,6 +47,8 @@ public partial class MainWindowViewModel : ObservableObject
 
     public async Task SelectFolderAsync(FolderNodeViewModel node, CancellationToken ct = default)
     {
+        CurrentFolderScavengeStatus = Store?.GetScavengeStatus(node.Folder);
+
         if (MessageList is not null)
             await MessageList.LoadAsync(node.Folder, ct);
     }
@@ -52,5 +57,13 @@ public partial class MainWindowViewModel : ObservableObject
     {
         if (MessageReader is not null)
             await MessageReader.LoadAsync(header.Id, ct);
+    }
+
+    public async Task RunScavengeAsync(FolderNodeViewModel node, IProgress<double>? progress = null, CancellationToken ct = default)
+    {
+        if (Store is null)
+            return;
+
+        CurrentFolderScavengeStatus = await Store.ScavengeAsync(node.Folder, progress, ct);
     }
 }

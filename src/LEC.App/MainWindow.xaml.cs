@@ -3,6 +3,7 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using LEC.App.ViewModels;
+using LEC.DbxFormat;
 using LEC.MailStore;
 using Microsoft.Win32;
 
@@ -23,6 +24,7 @@ public partial class MainWindow : Window
 
     private readonly MainWindowViewModel _viewModel = new();
     private LEC.App.Services.ImageBlockingWebView2Handler? _imageBlocker;
+    private CancellationTokenSource? _scavengeCts;
 
     public MainWindow()
     {
@@ -123,12 +125,66 @@ public partial class MainWindow : Window
         try
         {
             if (e.NewValue is FolderNodeViewModel node)
+            {
                 await _viewModel.SelectFolderAsync(node);
+                UpdateScavengeButtonVisibility(node);
+            }
         }
         catch (Exception ex)
         {
             _viewModel.StatusText = $"Não foi possível carregar esta pasta: {ex.Message}";
         }
+    }
+
+    private void UpdateScavengeButtonVisibility(FolderNodeViewModel node)
+    {
+        bool showButton = node.Folder.IsLoadable
+            && _viewModel.MessageList is not null // a profile is open
+            && _viewModel.CurrentFolderScavengeStatus?.State != ScavengeState.Scanned
+            && HasPartialHealth(node);
+
+        ScavengeButton.Visibility = showButton ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private bool HasPartialHealth(FolderNodeViewModel node) =>
+        _viewModel.Store?.GetFolderHealth(node.Folder) == StoreHealth.Partial;
+
+    private async void ScavengeButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (FolderTreeView.SelectedItem is not FolderNodeViewModel node)
+            return;
+
+        _scavengeCts = new CancellationTokenSource();
+        try
+        {
+            ScavengeButton.Visibility = Visibility.Collapsed;
+            CancelScavengeButton.Visibility = Visibility.Visible;
+
+            var progress = new Progress<double>(p => _viewModel.StatusText = $"Varrendo pasta... {p:P0}");
+            await _viewModel.RunScavengeAsync(node, progress, _scavengeCts.Token);
+
+            _viewModel.StatusText = null;
+            UpdateScavengeButtonVisibility(node);
+        }
+        catch (OperationCanceledException)
+        {
+            _viewModel.StatusText = "Varredura cancelada.";
+        }
+        catch (Exception ex)
+        {
+            _viewModel.StatusText = $"Não foi possível varrer esta pasta: {ex.Message}";
+        }
+        finally
+        {
+            CancelScavengeButton.Visibility = Visibility.Collapsed;
+            _scavengeCts?.Dispose();
+            _scavengeCts = null;
+        }
+    }
+
+    private void CancelScavengeButton_Click(object sender, RoutedEventArgs e)
+    {
+        _scavengeCts?.Cancel();
     }
 
     private async void MessageListView_SelectionChanged(object sender, SelectionChangedEventArgs e)
