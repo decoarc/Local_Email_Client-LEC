@@ -27,6 +27,7 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _scavengeCts;
     private ProfileViewModel? _selectedProfile;
     private FolderNodeViewModel? _selectedNode;
+    private TreeView? _selectedTreeView;
 
     public MainWindow()
     {
@@ -131,9 +132,25 @@ public partial class MainWindow : Window
         {
             _selectedProfile = null;
             _selectedNode = null;
+            _selectedTreeView = null;
+
+            // A scavenge scan reads through the profile's DbxStore/DbxEmailFile in the
+            // background -- cancel it before disposing that store below, so the scan sees a
+            // clean OperationCanceledException instead of an ObjectDisposedException from
+            // whatever it happens to be reading mid-scan.
+            _scavengeCts?.Cancel();
+
             ScavengeButton.Visibility = Visibility.Collapsed;
             CancelScavengeButton.Visibility = Visibility.Collapsed;
             RecoverableBar.Visibility = Visibility.Collapsed;
+
+            // Design §4/§6: closing the active profile returns list/reader/scavenge to the
+            // "no profile open" visual state. MessageList/MessageReader/CurrentFolderScavengeStatus
+            // are cleared by _viewModel.CloseProfile below (bound, so the list clears itself),
+            // but ReaderWebView isn't data-bound -- it keeps showing the last rendered message
+            // body unless we explicitly navigate it away.
+            NavigateToRenderedMessage(string.Empty);
+            ImagesBlockedBar.Visibility = Visibility.Collapsed;
         }
 
         _viewModel.CloseProfile(profile);
@@ -143,10 +160,26 @@ public partial class MainWindow : Window
     {
         try
         {
-            if (sender is TreeView { DataContext: ProfileViewModel profile } && e.NewValue is FolderNodeViewModel node)
+            if (sender is TreeView { DataContext: ProfileViewModel profile } treeView && e.NewValue is FolderNodeViewModel node)
             {
+                // Each TreeView keeps its own SelectedItem, so WPF only raises this event when
+                // a tree's own selection changes -- re-clicking an already-selected node in a
+                // DIFFERENT tree never fires here at all (WPF short-circuits it). Clearing the
+                // previously-selected tree's selection when the user moves to a different tree
+                // means that tree's node is no longer "selected" from WPF's point of view, so
+                // clicking back on it later raises this event again instead of being a dead
+                // click. This recurses synchronously into this handler with e.NewValue == null
+                // for the old tree, which the check below already no-ops on.
+                if (_selectedTreeView is { } previousTree && !ReferenceEquals(previousTree, treeView)
+                    && _selectedNode is { } previousNode
+                    && FindContainer(previousTree, previousNode) is { } previousContainer)
+                {
+                    previousContainer.IsSelected = false;
+                }
+
                 _selectedProfile = profile;
                 _selectedNode = node;
+                _selectedTreeView = treeView;
                 await _viewModel.SelectFolderAsync(profile, node);
                 UpdateScavengeButtonVisibility(node);
             }
@@ -157,11 +190,39 @@ public partial class MainWindow : Window
         }
     }
 
+    // Recursively looks up the TreeViewItem container for a view-model item, descending
+    // through already-generated child containers. FolderNodeViewModel has no parent
+    // reference to walk up from, so this walks down instead; it only needs to succeed for
+    // items that were previously selected, whose ancestor containers must already exist
+    // (a user can't click a node without its ancestors being expanded and realized first).
+    private static TreeViewItem? FindContainer(ItemsControl parent, object item)
+    {
+        if (parent.ItemContainerGenerator.ContainerFromItem(item) is TreeViewItem direct)
+            return direct;
+
+        foreach (var childItem in parent.Items)
+        {
+            if (parent.ItemContainerGenerator.ContainerFromItem(childItem) is TreeViewItem childContainer
+                && FindContainer(childContainer, item) is { } found)
+            {
+                return found;
+            }
+        }
+
+        return null;
+    }
+
     private void UpdateScavengeButtonVisibility(FolderNodeViewModel node)
     {
         var status = _viewModel.CurrentFolderScavengeStatus;
 
-        bool showTriggerButton = node.Folder.IsLoadable
+        // Only one scan can run at a time (see ScavengeButton_Click) -- while _scavengeCts is
+        // set, a scan is in flight for whichever (profile, folder) it was started against, so
+        // the trigger must stay hidden everywhere, including trees/folders the user switches
+        // to mid-scan. Otherwise clicking it here would start a second concurrent scan that
+        // stomps the first one's cancellation token and status.
+        bool showTriggerButton = _scavengeCts is null
+            && node.Folder.IsLoadable
             && _viewModel.MessageList is not null // a profile is open
             && status is null or { State: ScavengeState.NeverScanned }
             && HasPartialHealth(node);
@@ -199,8 +260,23 @@ public partial class MainWindow : Window
 
     private async void ScavengeButton_Click(object sender, RoutedEventArgs e)
     {
+        // Only one scan at a time: _scavengeCts, ScavengeButton and RecoverableBar are all
+        // single shared fields/controls even though there are now N profile trees. Without
+        // this guard, clicking the (now-stale) trigger for a different profile's folder while
+        // a scan is already running would overwrite _scavengeCts with a second CTS -- the
+        // first scan becomes uncancellable, whichever scan finishes last disposes the other's
+        // token source, and CurrentFolderScavengeStatus/RecoverableBar end up showing whichever
+        // scan happened to finish last regardless of which folder is on screen.
+        if (_scavengeCts is not null)
+            return;
+
         if (_selectedProfile is not { } profile || _selectedNode is not { } node)
             return;
+
+        // Snapshot which (profile, folder) this scan belongs to, distinct from
+        // _selectedProfile/_selectedNode which can move on while the scan is still running.
+        var scanProfile = profile;
+        var scanNode = node;
 
         _scavengeCts = new CancellationTokenSource();
         try
@@ -212,7 +288,14 @@ public partial class MainWindow : Window
             await _viewModel.RunScavengeAsync(profile, node, progress, _scavengeCts.Token);
 
             _viewModel.StatusText = null;
-            UpdateScavengeButtonVisibility(node);
+
+            // If the user has since selected a different folder/profile, that selection's
+            // button state was already correctly computed (and kept collapsed) by
+            // UpdateScavengeButtonVisibility while this scan was in flight -- refreshing it
+            // now against the possibly-stale `node` parameter would show the wrong folder's
+            // scan-trigger state.
+            if (ReferenceEquals(_selectedProfile, scanProfile) && ReferenceEquals(_selectedNode, scanNode))
+                UpdateScavengeButtonVisibility(node);
         }
         catch (OperationCanceledException)
         {
