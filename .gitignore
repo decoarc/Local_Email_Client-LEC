@@ -6,3 +6,6 @@ obj/
 
 # The user's real, irreplaceable legacy mail archive — never committed.
 BCP/
+
+# Scratch state for the brainstorming skill's visual companion (mockups, not deliverables).
+/.superpowers/
