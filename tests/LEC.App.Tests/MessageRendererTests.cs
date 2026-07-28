@@ -46,6 +46,7 @@ public class MessageRendererTests
         Assert.Equal("Ola", rendered.Subject);
         Assert.Equal("Ana <ana@example.com>", rendered.FromDisplay);
         Assert.Contains("Corpo em HTML", rendered.Html);
+        Assert.Empty(rendered.Attachments);
     }
 
     [Fact]
@@ -174,5 +175,46 @@ public class MessageRendererTests
 
         Assert.Contains("<img src=\"cid:missing-id\">", rendered.Html);
         Assert.DoesNotContain("data:image/png", rendered.Html);
+    }
+
+    [Fact]
+    public async Task ExtractsRealAttachmentsSeparatelyFromCidEmbeddedImages()
+    {
+        var builder = new BodyBuilder { HtmlBody = "<p>Ola <img src=\"cid:logo123\"></p>" };
+        var embeddedImage = (MimePart)builder.LinkedResources.Add("logo.png", new byte[] { 1, 2, 3 }, ContentType.Parse("image/png"));
+        embeddedImage.ContentId = "logo123";
+
+        byte[] attachmentBytes = Encoding.ASCII.GetBytes("conteudo do anexo");
+        builder.Attachments.Add("relatorio.txt", attachmentBytes, ContentType.Parse("text/plain"));
+
+        var message = new MimeMessage();
+        message.From.Add(new MailboxAddress("Ana", "ana@example.com"));
+        message.Subject = "Com anexo real";
+        message.Body = builder.ToMessageBody();
+
+        var stream = new MemoryStream();
+        message.WriteTo(stream);
+        stream.Position = 0;
+
+        var rendered = await MessageRenderer.RenderAsync(stream);
+
+        var attachment = Assert.Single(rendered.Attachments);
+        Assert.Equal("relatorio.txt", attachment.FileName);
+        Assert.Equal("text/plain", attachment.MimeType);
+        Assert.Equal(attachmentBytes.Length, attachment.Size);
+        Assert.Equal(0, attachment.Index);
+    }
+
+    [Fact]
+    public async Task ReturnsNoAttachmentsWhenTheMessageFailsToParse()
+    {
+        string raw =
+            "X-Bad Header: present so MimeKit's strict parser rejects this\r\n" +
+            "\r\n" +
+            "Corpo";
+
+        var rendered = await MessageRenderer.RenderAsync(RawMessage(raw));
+
+        Assert.Empty(rendered.Attachments);
     }
 }

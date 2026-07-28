@@ -145,7 +145,7 @@ public static class MessageRenderer
         if (message is null)
         {
             string fallbackHtml = BuildFallbackHtml(raw);
-            return new RenderedMessage(null, null, null, fallbackHtml);
+            return new RenderedMessage(null, null, null, fallbackHtml, Array.Empty<AttachmentInfo>());
         }
 
         string html = message.HtmlBody is { } htmlBody
@@ -156,6 +156,33 @@ public static class MessageRenderer
             ? (string.IsNullOrEmpty(mailbox.Name) ? mailbox.Address : $"{mailbox.Name} <{mailbox.Address}>")
             : null;
 
-        return new RenderedMessage(message.Subject, fromDisplay, message.Date, html);
+        return new RenderedMessage(message.Subject, fromDisplay, message.Date, html, ExtractAttachments(message));
+    }
+
+    // MimeMessage.Attachments já separa anexo de verdade de parte inline referenciada por
+    // cid: (essas ficam só no corpo HTML, via ResolveCidImages/BuildContentIdIndex acima) --
+    // verificado contra mensagens reais do BCP/ na Task 5 deste plano.
+    private static IReadOnlyList<AttachmentInfo> ExtractAttachments(MimeMessage message)
+    {
+        var attachments = new List<AttachmentInfo>();
+        int index = 0;
+
+        foreach (var entity in message.Attachments)
+        {
+            if (entity is not MimePart part)
+            {
+                continue;
+            }
+
+            string fileName = string.IsNullOrEmpty(part.FileName) ? $"anexo-{index + 1}" : part.FileName;
+
+            using var counting = new MemoryStream();
+            part.Content?.DecodeTo(counting);
+
+            attachments.Add(new AttachmentInfo(fileName, part.ContentType.MimeType, counting.Length, index));
+            index++;
+        }
+
+        return attachments;
     }
 }
