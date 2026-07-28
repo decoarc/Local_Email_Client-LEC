@@ -10,6 +10,9 @@
         <conv:SpecialToFontWeightConverter x:Key="SpecialToFontWeightConverter"/>
         <conv:HealthToVisibilityConverter x:Key="HealthToVisibilityConverter"/>
         <conv:NotLoadableTooltipConverter x:Key="NotLoadableTooltipConverter"/>
+        <conv:RecoveredKindToVisibilityConverter x:Key="RecoveredKindToVisibilityConverter"/>
+        <conv:RecoveredKindToLabelConverter x:Key="RecoveredKindToLabelConverter"/>
+        <conv:RecoveredKindToRowBrushConverter x:Key="RecoveredKindToRowBrushConverter"/>
     </Window.Resources>
     <DockPanel>
         <Menu DockPanel.Dock="Top">
@@ -57,11 +60,24 @@
                         <Button x:Name="CancelScavengeButton" Content="Cancelar" Margin="8,0,0,0"
                                 Click="CancelScavengeButton_Click" Visibility="Collapsed"/>
                     </StackPanel>
+                    <Border x:Name="RecoverableBar" DockPanel.Dock="Top" Background="#E8F0FE" Padding="6"
+                            Visibility="Collapsed">
+                        <DockPanel>
+                            <Button x:Name="ToggleRecoverableButton" DockPanel.Dock="Right"
+                                    Click="ToggleRecoverableButton_Click"/>
+                            <TextBlock x:Name="RecoverableCountText" VerticalAlignment="Center"/>
+                        </DockPanel>
+                    </Border>
                     <ListView x:Name="MessageListView"
                               ItemsSource="{Binding MessageList.Messages}"
                               SelectionChanged="MessageListView_SelectionChanged"
                               VirtualizingPanel.IsVirtualizing="True"
                               VirtualizingPanel.VirtualizationMode="Recycling">
+                        <ListView.ItemContainerStyle>
+                            <Style TargetType="ListViewItem">
+                                <Setter Property="Foreground" Value="{Binding RecoveredKind, Converter={StaticResource RecoveredKindToRowBrushConverter}}"/>
+                            </Style>
+                        </ListView.ItemContainerStyle>
                         <ListView.View>
                             <GridView>
                                 <GridViewColumn Header="!" Width="24">
@@ -70,6 +86,15 @@
                                             <TextBlock Text="{Binding Health, StringFormat={}{0}}"
                                                        Visibility="{Binding Health, Converter={StaticResource HealthToVisibilityConverter}}"
                                                        Foreground="DarkOrange" FontWeight="Bold" ToolTip="Mensagem com atributo fora do intervalo esperado — dado parcialmente recuperado."/>
+                                        </DataTemplate>
+                                    </GridViewColumn.CellTemplate>
+                                </GridViewColumn>
+                                <GridViewColumn Header="Origem" Width="80">
+                                    <GridViewColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding RecoveredKind, Converter={StaticResource RecoveredKindToLabelConverter}}"
+                                                       Visibility="{Binding RecoveredKind, Converter={StaticResource RecoveredKindToVisibilityConverter}}"
+                                                       FontStyle="Italic"/>
                                         </DataTemplate>
                                     </GridViewColumn.CellTemplate>
                                 </GridViewColumn>

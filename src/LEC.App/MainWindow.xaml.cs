@@ -138,16 +138,43 @@ public partial class MainWindow : Window
 
     private void UpdateScavengeButtonVisibility(FolderNodeViewModel node)
     {
-        bool showButton = node.Folder.IsLoadable
-            && _viewModel.MessageList is not null // a profile is open
-            && _viewModel.CurrentFolderScavengeStatus?.State != ScavengeState.Scanned
-            && HasPartialHealth(node);
+        var status = _viewModel.CurrentFolderScavengeStatus;
 
-        ScavengeButton.Visibility = showButton ? Visibility.Visible : Visibility.Collapsed;
+        bool showTriggerButton = node.Folder.IsLoadable
+            && _viewModel.MessageList is not null // a profile is open
+            && status is null or { State: ScavengeState.NeverScanned }
+            && HasPartialHealth(node);
+        ScavengeButton.Visibility = showTriggerButton ? Visibility.Visible : Visibility.Collapsed;
+
+        bool showBar = status is { State: ScavengeState.Scanned, RecoveredCount: > 0 };
+        RecoverableBar.Visibility = showBar ? Visibility.Visible : Visibility.Collapsed;
+        if (showBar)
+        {
+            RecoverableCountText.Text = $"{status!.RecoveredCount} mensagens recuperáveis neste arquivo";
+            ToggleRecoverableButton.Content = status.IsVisible ? "Esconder" : "Mostrar";
+        }
     }
 
     private bool HasPartialHealth(FolderNodeViewModel node) =>
         _viewModel.Store?.GetFolderHealth(node.Folder) == StoreHealth.Partial;
+
+    private async void ToggleRecoverableButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (FolderTreeView.SelectedItem is not FolderNodeViewModel node || _viewModel.Store is null)
+            return;
+
+        try
+        {
+            bool newVisibility = !(_viewModel.CurrentFolderScavengeStatus?.IsVisible ?? false);
+            _viewModel.Store.SetScavengeVisibility(node.Folder, newVisibility);
+            await _viewModel.SelectFolderAsync(node); // reload the list + refresh status/button state
+            UpdateScavengeButtonVisibility(node);
+        }
+        catch (Exception ex)
+        {
+            _viewModel.StatusText = $"Não foi possível alternar a exibição de recuperáveis: {ex.Message}";
+        }
+    }
 
     private async void ScavengeButton_Click(object sender, RoutedEventArgs e)
     {
