@@ -1,4 +1,5 @@
 using System.Linq;
+using System.Text;
 using Xunit;
 
 namespace LEC.DbxFormat.Tests;
@@ -79,5 +80,79 @@ public class DbxScavengerTests
         var candidates = DbxScavenger.FindCandidateBlockStarts(BufferOf(buffer)).ToList();
 
         Assert.Equal(new[] { 0 }, candidates);
+    }
+
+    private static void WriteChain(byte[] buffer, (int offset, short size, int next)[] blocks, byte[] payload)
+    {
+        int payloadPos = 0;
+        foreach (var (offset, size, next) in blocks)
+        {
+            WriteValidBlockHeader(buffer, offset, size, next);
+            Array.Copy(payload, payloadPos, buffer, offset + DbxFormat.MessageBlockDataOffset, size);
+            payloadPos += size;
+        }
+    }
+
+    [Fact]
+    public void ScanFindsAnOrphanChainNotInTheReferencedSet()
+    {
+        var buffer = new byte[4096];
+        new Random(11).NextBytes(buffer);
+        byte[] payload = Encoding.ASCII.GetBytes("From: a@b.com\r\nSubject: Orfa\r\n\r\nCorpo orfao");
+        WriteChain(buffer, new[] { (500, (short)payload.Length, 0) }, payload);
+
+        var results = DbxScavenger.Scan(BufferOf(buffer), alreadyReferencedOffsets: new HashSet<int>());
+
+        var found = Assert.Single(results);
+        Assert.Equal(500, found.ChainStartOffset);
+        Assert.False(found.Truncated);
+        Assert.Equal(payload, found.RawBytes);
+    }
+
+    [Fact]
+    public void ScanSkipsChainsAlreadyInTheReferencedSet()
+    {
+        var buffer = new byte[4096];
+        new Random(12).NextBytes(buffer);
+        byte[] payload = Encoding.ASCII.GetBytes("conteudo normal, ja indexado");
+        WriteChain(buffer, new[] { (600, (short)payload.Length, 0) }, payload);
+
+        var results = DbxScavenger.Scan(BufferOf(buffer), alreadyReferencedOffsets: new HashSet<int> { 600 });
+
+        Assert.Empty(results);
+    }
+
+    [Fact]
+    public void ScanDoesNotDoubleReportBlocksSharedByASingleChain()
+    {
+        var buffer = new byte[4096];
+        new Random(13).NextBytes(buffer);
+        byte[] payload = Encoding.ASCII.GetBytes(new string('x', 20) + new string('y', 20));
+        // Two blocks, chained: 700 -> 800 -> 0.
+        WriteChain(buffer,
+            new[] { (700, (short)20, 800), (800, (short)20, 0) },
+            payload);
+
+        var results = DbxScavenger.Scan(BufferOf(buffer), alreadyReferencedOffsets: new HashSet<int>());
+
+        // Only one ScavengedMessage for the whole two-block chain -- 800 (a valid header
+        // in its own right, since every block satisfies the self-ref+marker check) must
+        // not be reported as a second, independent orphan.
+        Assert.Single(results);
+    }
+
+    [Fact]
+    public void ScanReportsTruncatedChainsWithTruncatedTrue()
+    {
+        var buffer = new byte[200];
+        new Random(14).NextBytes(buffer);
+        // A chain whose "next" pointer goes past end-of-file -- ReadChain already handles
+        // this (Fase 1), Scan just needs to surface it via ScavengedMessage.Truncated.
+        WriteValidBlockHeader(buffer, offset: 52, dataSize: 30, next: 999_999);
+
+        var results = DbxScavenger.Scan(BufferOf(buffer), alreadyReferencedOffsets: new HashSet<int>());
+
+        var found = Assert.Single(results);
+        Assert.True(found.Truncated);
     }
 }

@@ -2,7 +2,7 @@ namespace LEC.DbxFormat;
 
 public static class DbxMessageBlockReader
 {
-    public sealed record Result(byte[] Data, bool Truncated);
+    public sealed record Result(byte[] Data, bool Truncated, IReadOnlySet<int> VisitedOffsets);
 
     public static Result ReadChain(IDbxByteSource source, int startOffset)
     {
@@ -58,6 +58,6 @@ public static class DbxMessageBlockReader
             offset = source.ReadInt32(offset + DbxFormat.MessageBlockNextOffset);
         }
 
-        return new Result(buffer.ToArray(), truncated);
+        return new Result(buffer.ToArray(), truncated, visited);
     }
 }
