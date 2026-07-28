@@ -159,9 +159,15 @@ public static class MessageRenderer
         return new RenderedMessage(message.Subject, fromDisplay, message.Date, html, ExtractAttachments(message));
     }
 
-    // MimeMessage.Attachments já separa anexo de verdade de parte inline referenciada por
-    // cid: (essas ficam só no corpo HTML, via ResolveCidImages/BuildContentIdIndex acima) --
-    // verificado contra mensagens reais do BCP/ na Task 5 deste plano.
+    // MimeMessage.Attachments é puramente baseado em ContentDisposition?.IsAttachment -- não
+    // tem nenhuma noção de referência cid: (verificado contra a implementação real do MimeKit
+    // 4.17.0). Funciona corretamente pro caso comum observado em dados reais do BCP/ (parte
+    // cid: com Content-Disposition: inline ou sem disposition nenhuma), mas tem duas lacunas
+    // conhecidas, não corrigidas nesta fase (ver design doc §9):
+    //   (a) uma parte referenciada por cid: que também carrega Content-Disposition: attachment
+    //       fica listada duas vezes -- inline no HTML E como anexo baixável;
+    //   (b) um anexo de verdade sem nenhum header Content-Disposition (alguns remetentes
+    //       antigos só setam Content-Type: ...; name=...) é silenciosamente excluído da lista.
     private static IReadOnlyList<AttachmentInfo> ExtractAttachments(MimeMessage message)
     {
         var attachments = new List<AttachmentInfo>();

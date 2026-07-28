@@ -135,7 +135,9 @@
                         </DockPanel>
                     </Border>
                     <Border DockPanel.Dock="Top" Background="#EFEFEF" Padding="6"
-                            Visibility="{Binding MessageReader.Current.Attachments, Converter={StaticResource AttachmentListToVisibilityConverter}}">
+                            Visibility="{Binding MessageReader.Current.Attachments,
+                                         Converter={StaticResource AttachmentListToVisibilityConverter},
+                                         FallbackValue=Collapsed}">
                         <ItemsControl ItemsSource="{Binding MessageReader.Current.Attachments}">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate>

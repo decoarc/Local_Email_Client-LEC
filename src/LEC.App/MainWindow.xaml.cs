@@ -1,4 +1,5 @@
 // src/LEC.App/MainWindow.xaml.cs
+using System.IO;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
@@ -126,7 +127,7 @@ public partial class MainWindow : Window
         if ((sender as FrameworkElement)?.Tag is not AttachmentInfo attachment || _viewModel.MessageReader is null)
             return;
 
-        var dialog = new SaveFileDialog { FileName = attachment.FileName };
+        var dialog = new SaveFileDialog { FileName = SanitizeAttachmentFileName(attachment.FileName) };
         if (dialog.ShowDialog() != true)
             return;
 
@@ -139,6 +140,31 @@ public partial class MainWindow : Window
         {
             _viewModel.StatusText = $"Não foi possível salvar o anexo: {ex.Message}";
         }
+    }
+
+    // attachment.FileName comes straight from a MimePart's Content-Disposition/Content-Type
+    // header -- i.e. from an old, untrusted .dbx email, never validated as safe. SaveFileDialog
+    // treats FileName as a path expression it pre-fills and resolves on Save (e.g.
+    // "..\..\evil.exe" or an absolute path into a startup folder), so this untrusted value must
+    // be reduced to a bare, harmless file name before it ever reaches the dialog. The
+    // destination the user ultimately picks via the native dialog needs no further validation --
+    // only this pre-fill value does.
+    private static string SanitizeAttachmentFileName(string fileName)
+    {
+        string name = Path.GetFileName(fileName);
+
+        char[] invalid = Path.GetInvalidFileNameChars();
+        if (name.IndexOfAny(invalid) >= 0)
+        {
+            var builder = new System.Text.StringBuilder(name.Length);
+            foreach (char c in name)
+            {
+                builder.Append(Array.IndexOf(invalid, c) >= 0 ? '_' : c);
+            }
+            name = builder.ToString();
+        }
+
+        return string.IsNullOrEmpty(name) ? "anexo" : name;
     }
 
     private void OpenProfile_Click(object sender, RoutedEventArgs e)

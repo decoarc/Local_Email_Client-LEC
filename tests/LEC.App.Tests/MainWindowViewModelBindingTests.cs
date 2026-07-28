@@ -1,7 +1,10 @@
 // tests/LEC.App.Tests/MainWindowViewModelBindingTests.cs
 using System.Runtime.ExceptionServices;
+using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
+using LEC.App.Converters;
+using LEC.App.Services;
 using LEC.App.ViewModels;
 using LEC.MailStore;
 using Xunit;
@@ -90,5 +93,58 @@ public class MainWindowViewModelBindingTests
         vm.MessageReader = reader;
 
         Assert.Same(reader, target.Content);
+    });
+
+    /// <summary>
+    /// Regression coverage for finding #1 of the final Fase Anexos review: MainWindow.xaml
+    /// binds the attachments bar's Visibility to MessageReader.Current.Attachments through
+    /// AttachmentListToVisibilityConverter. Whenever any link in that path is null (no
+    /// profile open yet -- MessageReader is null; or a folder selected but no message loaded
+    /// -- Current is null), WPF resolves the path to UnsetValue and skips the converter
+    /// entirely, falling back to VisibilityProperty's own metadata default (Visible) unless a
+    /// FallbackValue is supplied. This drives the exact same binding MainWindow.xaml declares
+    /// (converter + FallbackValue=Collapsed) against a real Border/VisibilityProperty via
+    /// BindingOperations.SetBinding, proving the fix resolves to Collapsed for both null-link
+    /// cases and still behaves correctly (Collapsed for empty, Visible for non-empty) once a
+    /// real MessageReaderViewModel/RenderedMessage with attachments is set.
+    /// </summary>
+    [Fact]
+    public void AttachmentsBarVisibilityFallsBackToCollapsedWhenPathIsUnresolved() => RunOnSta(() =>
+    {
+        var vm = new MainWindowViewModel();
+        var target = new Border();
+        BindingOperations.SetBinding(
+            target,
+            UIElement.VisibilityProperty,
+            new Binding("MessageReader.Current.Attachments")
+            {
+                Source = vm,
+                Converter = new AttachmentListToVisibilityConverter(),
+                FallbackValue = Visibility.Collapsed,
+            });
+
+        // MessageReader is null -- same as MainWindow at startup, before any profile has been
+        // opened. Without FallbackValue, this would resolve to Visible (the bug in finding #1).
+        Assert.Equal(Visibility.Collapsed, target.Visibility);
+
+        var reader = new MessageReaderViewModel(new FakeMailStore(Array.Empty<StoreFolder>()));
+        vm.MessageReader = reader;
+
+        // MessageReader is now non-null, but Current is still null -- a folder was selected but
+        // no message has been loaded yet. Same UnsetValue/fallback path as above.
+        Assert.Equal(Visibility.Collapsed, target.Visibility);
+
+        reader.Current = new RenderedMessage(null, null, null, "<html></html>", Array.Empty<AttachmentInfo>());
+
+        // Current is non-null but has no attachments -- the path now resolves, the converter
+        // runs, and it returns Collapsed for an empty list.
+        Assert.Equal(Visibility.Collapsed, target.Visibility);
+
+        reader.Current = new RenderedMessage(
+            null, null, null, "<html></html>",
+            new[] { new AttachmentInfo("foo.txt", "text/plain", 123, 0) });
+
+        // A message with a real attachment -- the converter returns Visible.
+        Assert.Equal(Visibility.Visible, target.Visibility);
     });
 }
