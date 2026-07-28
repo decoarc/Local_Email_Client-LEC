@@ -118,11 +118,19 @@ public sealed class TestDbxBuilder
             throw new ArgumentException($"Block data must be 1..{DbxFormat.MessageBlockMaxDataSize} bytes.");
 
         int start = _bytes.Count;
-        WriteBytes(new byte[8]);              // 0..7: unused by the reader
+        WriteInt32(start);                              // 0..3: self-offset (verified real-file marker)
+        WriteInt32(DbxFormat.MessageBlockMaxDataSize);  // 4..7: fixed 0x200 marker (verified real-file marker)
         WriteInt16((short)data.Length);       // 8..9
         WriteBytes(new byte[2]);              // 10..11: unused
         WriteInt32(nextOffset);               // 12..15
         WriteBytes(data);                     // 16..
+
+        // Real block headers are always found at 4-byte-aligned file offsets (verified,
+        // see DbxFormat.cs); pad so whatever this builder writes next stays aligned too,
+        // regardless of this block's data length.
+        int misalignment = _bytes.Count % 4;
+        if (misalignment != 0)
+            WriteBytes(new byte[4 - misalignment]);
 
         return start;
     }

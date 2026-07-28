@@ -75,6 +75,42 @@ public sealed class DbxEmailFile : IDisposable
         return result.Data;
     }
 
+    /// <summary>
+    /// Scavenges this file for message chains the index tree does not reference.
+    /// Builds the "already referenced" set by walking every already-indexed message's
+    /// full chain (not just its start offset) -- every block in a chain independently
+    /// satisfies the same self-reference+marker check a scavenge candidate does, so a
+    /// mid-chain block of a perfectly normal message must not be reported as an orphan.
+    /// </summary>
+    public IReadOnlyList<ScavengedMessage> Scavenge(IProgress<double>? progress = null, CancellationToken ct = default)
+    {
+        var referenced = new HashSet<int>();
+        foreach (var info in Messages)
+        {
+            if (info.MessageBlockOffset <= 0)
+                continue;
+
+            var chain = DbxMessageBlockReader.ReadChain(_source, info.MessageBlockOffset);
+            foreach (int offset in chain.VisitedOffsets)
+                referenced.Add(offset);
+        }
+
+        return DbxScavenger.Scan(_source, referenced, progress, ct);
+    }
+
+    /// <summary>
+    /// Re-reads the raw bytes of a chain found by Scavenge, given the chain-start offset
+    /// from its ScavengedMessage. Scavenge itself already has the bytes in memory at scan
+    /// time, but they aren't persisted (only metadata is cached -- see LEC.MailStore's
+    /// ScavengeCache) so opening a recovered message later re-walks the chain fresh.
+    /// </summary>
+    public byte[] ReadRecoveredMessageRaw(int chainStartOffset, out bool truncated)
+    {
+        var result = DbxMessageBlockReader.ReadChain(_source, chainStartOffset);
+        truncated = result.Truncated;
+        return result.Data;
+    }
+
     public void Dispose()
     {
         if (_ownsSource)
