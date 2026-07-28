@@ -25,6 +25,10 @@ public partial class MainWindow : Window
     private readonly MainWindowViewModel _viewModel = new();
     private LEC.App.Services.ImageBlockingWebView2Handler? _imageBlocker;
     private CancellationTokenSource? _scavengeCts;
+    // The profile the in-flight scan (if any) is actually running against -- distinct from
+    // _selectedProfile, which can move to a different profile's tree while the scan keeps
+    // running in the background (see ScavengeButton_Click's scanProfile/scanNode snapshot).
+    private ProfileViewModel? _scavengeProfile;
     private ProfileViewModel? _selectedProfile;
     private FolderNodeViewModel? _selectedNode;
     private TreeView? _selectedTreeView;
@@ -128,17 +132,24 @@ public partial class MainWindow : Window
         if ((sender as FrameworkElement)?.DataContext is not ProfileViewModel profile)
             return;
 
+        // A scavenge scan reads through the profile's DbxStore/DbxEmailFile in the
+        // background -- cancel it before disposing that store below, so the scan sees a
+        // clean OperationCanceledException instead of an ObjectDisposedException from
+        // whatever it happens to be reading mid-scan. This is checked against
+        // _scavengeProfile (the profile the in-flight scan actually owns), not
+        // _selectedProfile: navigating to a different profile's tree while a scan runs in
+        // the background is allowed, so the scavenged profile and the selected profile can
+        // be two different profiles by the time either one's "x" is clicked.
+        if (ReferenceEquals(_scavengeProfile, profile))
+        {
+            _scavengeCts?.Cancel();
+        }
+
         if (ReferenceEquals(_selectedProfile, profile))
         {
             _selectedProfile = null;
             _selectedNode = null;
             _selectedTreeView = null;
-
-            // A scavenge scan reads through the profile's DbxStore/DbxEmailFile in the
-            // background -- cancel it before disposing that store below, so the scan sees a
-            // clean OperationCanceledException instead of an ObjectDisposedException from
-            // whatever it happens to be reading mid-scan.
-            _scavengeCts?.Cancel();
 
             ScavengeButton.Visibility = Visibility.Collapsed;
             CancelScavengeButton.Visibility = Visibility.Collapsed;
@@ -279,6 +290,7 @@ public partial class MainWindow : Window
         var scanNode = node;
 
         _scavengeCts = new CancellationTokenSource();
+        _scavengeProfile = scanProfile;
         try
         {
             ScavengeButton.Visibility = Visibility.Collapsed;
@@ -310,6 +322,7 @@ public partial class MainWindow : Window
             CancelScavengeButton.Visibility = Visibility.Collapsed;
             _scavengeCts?.Dispose();
             _scavengeCts = null;
+            _scavengeProfile = null;
         }
     }
 
