@@ -13,6 +13,7 @@
         <conv:RecoveredKindToVisibilityConverter x:Key="RecoveredKindToVisibilityConverter"/>
         <conv:RecoveredKindToLabelConverter x:Key="RecoveredKindToLabelConverter"/>
         <conv:RecoveredKindToRowBrushConverter x:Key="RecoveredKindToRowBrushConverter"/>
+        <conv:AttachmentListToVisibilityConverter x:Key="AttachmentListToVisibilityConverter"/>
     </Window.Resources>
     <DockPanel>
         <Menu DockPanel.Dock="Top">
@@ -132,6 +133,27 @@
                             <Button DockPanel.Dock="Right" Content="Exibir imagens" Click="ShowImages_Click"/>
                             <TextBlock Text="Imagens remotas foram bloqueadas por padrão." VerticalAlignment="Center"/>
                         </DockPanel>
+                    </Border>
+                    <Border DockPanel.Dock="Top" Background="#EFEFEF" Padding="6"
+                            Visibility="{Binding MessageReader.Current.Attachments, Converter={StaticResource AttachmentListToVisibilityConverter}}">
+                        <ItemsControl ItemsSource="{Binding MessageReader.Current.Attachments}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <StackPanel Orientation="Horizontal"/>
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Background="White" BorderBrush="#CCCCCC" BorderThickness="1" CornerRadius="3" Margin="0,0,6,0" Padding="6,3">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="{Binding FileName}" VerticalAlignment="Center"/>
+                                            <TextBlock Text="{Binding Size, StringFormat={}{0:N0} bytes}" Foreground="Gray" Margin="6,0,0,0" VerticalAlignment="Center"/>
+                                            <Button Content="Salvar" Margin="6,0,0,0" Click="SaveAttachment_Click" Tag="{Binding}"/>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
                     </Border>
                     <wv2:WebView2 x:Name="ReaderWebView"/>
                 </DockPanel>

@@ -2,6 +2,7 @@
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using LEC.App.Services;
 using LEC.App.ViewModels;
 using LEC.DbxFormat;
 using LEC.MailStore;
@@ -118,6 +119,26 @@ public partial class MainWindow : Window
         _imageBlocker.BlockImages = false;
         ImagesBlockedBar.Visibility = Visibility.Collapsed;
         ReaderWebView.Reload();
+    }
+
+    private async void SaveAttachment_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is not AttachmentInfo attachment || _viewModel.MessageReader is null)
+            return;
+
+        var dialog = new SaveFileDialog { FileName = attachment.FileName };
+        if (dialog.ShowDialog() != true)
+            return;
+
+        try
+        {
+            await _viewModel.MessageReader.SaveAttachmentAsync(attachment.Index, dialog.FileName);
+            _viewModel.StatusText = $"Anexo salvo em {dialog.FileName}";
+        }
+        catch (Exception ex)
+        {
+            _viewModel.StatusText = $"Não foi possível salvar o anexo: {ex.Message}";
+        }
     }
 
     private void OpenProfile_Click(object sender, RoutedEventArgs e)
