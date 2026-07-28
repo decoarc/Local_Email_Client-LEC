@@ -176,10 +176,23 @@ public static class MessageRenderer
 
             string fileName = string.IsNullOrEmpty(part.FileName) ? $"anexo-{index + 1}" : part.FileName;
 
-            using var counting = new MemoryStream();
-            part.Content?.DecodeTo(counting);
+            long size = 0;
+            try
+            {
+                using var counting = new MemoryStream();
+                part.Content?.DecodeTo(counting);
+                size = counting.Length;
+            }
+            catch
+            {
+                // A malformed attachment must never crash rendering -- if decode fails,
+                // degrade gracefully by treating the size as unknown (0) rather than
+                // propagating the exception and crashing the whole message render.
+                // This is especially important for scavenged messages where attachment
+                // streams may be corrupted or truncated.
+            }
 
-            attachments.Add(new AttachmentInfo(fileName, part.ContentType.MimeType, counting.Length, index));
+            attachments.Add(new AttachmentInfo(fileName, part.ContentType.MimeType, size, index));
             index++;
         }
 
