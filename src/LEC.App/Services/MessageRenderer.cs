@@ -198,4 +198,30 @@ public static class MessageRenderer
 
         return attachments;
     }
+
+    /// <summary>
+    /// Relê e reparseia a mensagem inteira do zero e escreve só os bytes decodificados do
+    /// anexo pedido no disco. Deliberadamente não compartilha nada com RenderAsync/
+    /// ExtractAttachments -- o painel de leitura pode estar mostrando uma mensagem por
+    /// minutos antes do usuário decidir salvar um anexo, e reparsear a cada vez evita manter
+    /// qualquer parser ou stream do MimeKit "vivo" por esse tempo todo.
+    /// </summary>
+    public static async Task SaveAttachmentAsync(Stream rawMessage, int attachmentIndex, string destinationPath, CancellationToken ct = default)
+    {
+        var message = await MimeMessage.LoadAsync(rawMessage, ct);
+        var attachments = message.Attachments.OfType<MimePart>().ToList();
+
+        if (attachmentIndex < 0 || attachmentIndex >= attachments.Count)
+        {
+            throw new InvalidOperationException($"Anexo não encontrado nesta mensagem (índice {attachmentIndex}).");
+        }
+
+        if (attachments[attachmentIndex].Content is not { } content)
+        {
+            throw new InvalidOperationException("Este anexo não tem conteúdo para salvar.");
+        }
+
+        using var destination = File.Create(destinationPath);
+        content.DecodeTo(destination);
+    }
 }

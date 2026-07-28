@@ -295,4 +295,43 @@ public class MessageRendererTests
         Assert.Equal("text/plain", attachment.MimeType);
         Assert.Equal(0, attachment.Size);
     }
+
+    [Fact]
+    public async Task SaveAttachmentAsyncWritesTheDecodedBytesToTheDestinationPath()
+    {
+        var builder = new BodyBuilder { HtmlBody = "<p>Ola</p>" };
+        byte[] attachmentBytes = Encoding.ASCII.GetBytes("conteudo do anexo");
+        builder.Attachments.Add("relatorio.txt", attachmentBytes, ContentType.Parse("text/plain"));
+
+        var message = new MimeMessage();
+        message.From.Add(new MailboxAddress("Ana", "ana@example.com"));
+        message.Body = builder.ToMessageBody();
+
+        var stream = new MemoryStream();
+        message.WriteTo(stream);
+        stream.Position = 0;
+
+        string destinationPath = Path.Combine(Path.GetTempPath(), $"lec-attachment-test-{Guid.NewGuid():N}.txt");
+        try
+        {
+            await MessageRenderer.SaveAttachmentAsync(stream, attachmentIndex: 0, destinationPath);
+
+            byte[] written = await File.ReadAllBytesAsync(destinationPath);
+            Assert.Equal(attachmentBytes, written);
+        }
+        finally
+        {
+            File.Delete(destinationPath);
+        }
+    }
+
+    [Fact]
+    public async Task SaveAttachmentAsyncThrowsForAnOutOfRangeIndex()
+    {
+        string raw = "From: a@b.com\r\nSubject: X\r\n\r\nSem anexos";
+        string destinationPath = Path.Combine(Path.GetTempPath(), $"lec-attachment-test-{Guid.NewGuid():N}.txt");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            MessageRenderer.SaveAttachmentAsync(RawMessage(raw), attachmentIndex: 0, destinationPath));
+    }
 }
