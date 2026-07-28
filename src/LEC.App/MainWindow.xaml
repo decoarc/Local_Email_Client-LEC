@@ -31,18 +31,36 @@
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
 
-            <TreeView Grid.Column="0" x:Name="FolderTreeView"
-                      ItemsSource="{Binding FolderTree.RootNodes}"
-                      SelectedItemChanged="FolderTreeView_SelectedItemChanged">
-                <TreeView.ItemTemplate>
-                    <HierarchicalDataTemplate ItemsSource="{Binding Children}">
-                        <TextBlock Text="{Binding DisplayName}"
-                                   Foreground="{Binding IsLoadable, Converter={StaticResource LoadableToBrushConverter}}"
-                                   FontWeight="{Binding IsSpecial, Converter={StaticResource SpecialToFontWeightConverter}}"
-                                   ToolTip="{Binding IsLoadable, Converter={StaticResource NotLoadableTooltipConverter}}"/>
-                    </HierarchicalDataTemplate>
-                </TreeView.ItemTemplate>
-            </TreeView>
+            <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto">
+                <ItemsControl ItemsSource="{Binding OpenProfiles}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel Margin="0,0,0,8">
+                                <DockPanel Background="#DCE3EA" Margin="0,0,0,2">
+                                    <Button DockPanel.Dock="Right" Content="×" Width="22" Height="22" Margin="2"
+                                            Click="CloseProfile_Click" ToolTip="Fechar perfil"/>
+                                    <TextBlock Text="{Binding DisplayName}" FontWeight="Bold"
+                                               VerticalAlignment="Center" Margin="4,0,0,0"/>
+                                </DockPanel>
+                                <TreeView ItemsSource="{Binding FolderTree.RootNodes}"
+                                          SelectedItemChanged="FolderTreeView_SelectedItemChanged"
+                                          BorderThickness="0"
+                                          ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                                          ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                    <TreeView.ItemTemplate>
+                                        <HierarchicalDataTemplate ItemsSource="{Binding Children}">
+                                            <TextBlock Text="{Binding DisplayName}"
+                                                       Foreground="{Binding IsLoadable, Converter={StaticResource LoadableToBrushConverter}}"
+                                                       FontWeight="{Binding IsSpecial, Converter={StaticResource SpecialToFontWeightConverter}}"
+                                                       ToolTip="{Binding IsLoadable, Converter={StaticResource NotLoadableTooltipConverter}}"/>
+                                        </HierarchicalDataTemplate>
+                                    </TreeView.ItemTemplate>
+                                </TreeView>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
 
             <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Stretch"/>
 

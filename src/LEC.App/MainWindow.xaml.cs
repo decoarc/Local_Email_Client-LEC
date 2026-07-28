@@ -25,6 +25,8 @@ public partial class MainWindow : Window
     private readonly MainWindowViewModel _viewModel = new();
     private LEC.App.Services.ImageBlockingWebView2Handler? _imageBlocker;
     private CancellationTokenSource? _scavengeCts;
+    private ProfileViewModel? _selectedProfile;
+    private FolderNodeViewModel? _selectedNode;
 
     public MainWindow()
     {
@@ -120,13 +122,32 @@ public partial class MainWindow : Window
             _viewModel.OpenProfile(dialog.FolderName);
     }
 
+    private void CloseProfile_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not ProfileViewModel profile)
+            return;
+
+        if (ReferenceEquals(_selectedProfile, profile))
+        {
+            _selectedProfile = null;
+            _selectedNode = null;
+            ScavengeButton.Visibility = Visibility.Collapsed;
+            CancelScavengeButton.Visibility = Visibility.Collapsed;
+            RecoverableBar.Visibility = Visibility.Collapsed;
+        }
+
+        _viewModel.CloseProfile(profile);
+    }
+
     private async void FolderTreeView_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
     {
         try
         {
-            if (e.NewValue is FolderNodeViewModel node)
+            if (sender is TreeView { DataContext: ProfileViewModel profile } && e.NewValue is FolderNodeViewModel node)
             {
-                await _viewModel.SelectFolderAsync(node);
+                _selectedProfile = profile;
+                _selectedNode = node;
+                await _viewModel.SelectFolderAsync(profile, node);
                 UpdateScavengeButtonVisibility(node);
             }
         }
@@ -160,14 +181,14 @@ public partial class MainWindow : Window
 
     private async void ToggleRecoverableButton_Click(object sender, RoutedEventArgs e)
     {
-        if (FolderTreeView.SelectedItem is not FolderNodeViewModel node || _viewModel.Store is null)
+        if (_selectedProfile is not { } profile || _selectedNode is not { } node)
             return;
 
         try
         {
             bool newVisibility = !(_viewModel.CurrentFolderScavengeStatus?.IsVisible ?? false);
-            _viewModel.Store.SetScavengeVisibility(node.Folder, newVisibility);
-            await _viewModel.SelectFolderAsync(node); // reload the list + refresh status/button state
+            profile.Store.SetScavengeVisibility(node.Folder, newVisibility);
+            await _viewModel.SelectFolderAsync(profile, node); // reload the list + refresh status/button state
             UpdateScavengeButtonVisibility(node);
         }
         catch (Exception ex)
@@ -178,7 +199,7 @@ public partial class MainWindow : Window
 
     private async void ScavengeButton_Click(object sender, RoutedEventArgs e)
     {
-        if (FolderTreeView.SelectedItem is not FolderNodeViewModel node)
+        if (_selectedProfile is not { } profile || _selectedNode is not { } node)
             return;
 
         _scavengeCts = new CancellationTokenSource();
@@ -188,7 +209,7 @@ public partial class MainWindow : Window
             CancelScavengeButton.Visibility = Visibility.Visible;
 
             var progress = new Progress<double>(p => _viewModel.StatusText = $"Varrendo pasta... {p:P0}");
-            await _viewModel.RunScavengeAsync(node, progress, _scavengeCts.Token);
+            await _viewModel.RunScavengeAsync(profile, node, progress, _scavengeCts.Token);
 
             _viewModel.StatusText = null;
             UpdateScavengeButtonVisibility(node);

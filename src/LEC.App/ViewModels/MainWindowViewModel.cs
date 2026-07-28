@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using LEC.DbxFormat;
@@ -7,13 +8,16 @@ namespace LEC.App.ViewModels;
 
 public partial class MainWindowViewModel : ObservableObject
 {
+    public ObservableCollection<ProfileViewModel> OpenProfiles { get; } = new();
+
     [ObservableProperty]
-    private IMailStore? _store;
+    [NotifyPropertyChangedFor(nameof(Store))]
+    private ProfileViewModel? _activeProfile;
+
+    public IMailStore? Store => ActiveProfile?.Store;
 
     [ObservableProperty]
     private string? _statusText;
-
-    public FolderTreeViewModel FolderTree { get; } = new();
 
     [ObservableProperty]
     private MessageListViewModel? _messageList;
@@ -28,16 +32,13 @@ public partial class MainWindowViewModel : ObservableObject
     {
         try
         {
-            var newStore = DbxStore.Open(profileDirectory);
+            var store = DbxStore.Open(profileDirectory);
+            string displayName = new DirectoryInfo(profileDirectory).Name;
+            OpenProfiles.Add(new ProfileViewModel(displayName, profileDirectory, store));
 
-            Store?.Dispose();
-            Store = newStore;
-            FolderTree.Build(Store.Folders);
-            MessageList = new MessageListViewModel(Store);
-            MessageReader = new MessageReaderViewModel(Store);
-            StatusText = Store.Health == StoreHealth.Ok
+            StatusText = store.Health == StoreHealth.Ok
                 ? null
-                : $"Perfil aberto com avisos (Health: {Store.Health}).";
+                : $"Perfil aberto com avisos (Health: {store.Health}).";
         }
         catch (Exception ex) when (ex is DbxFormatException or IOException or UnauthorizedAccessException)
         {
@@ -45,12 +46,33 @@ public partial class MainWindowViewModel : ObservableObject
         }
     }
 
-    public async Task SelectFolderAsync(FolderNodeViewModel node, CancellationToken ct = default)
+    public void CloseProfile(ProfileViewModel profile)
     {
-        CurrentFolderScavengeStatus = Store?.GetScavengeStatus(node.Folder);
+        bool wasActive = ReferenceEquals(ActiveProfile, profile);
 
-        if (MessageList is not null)
-            await MessageList.LoadAsync(node.Folder, ct);
+        OpenProfiles.Remove(profile);
+        profile.Store.Dispose();
+
+        if (wasActive)
+        {
+            ActiveProfile = null;
+            MessageList = null;
+            MessageReader = null;
+            CurrentFolderScavengeStatus = null;
+        }
+    }
+
+    public async Task SelectFolderAsync(ProfileViewModel profile, FolderNodeViewModel node, CancellationToken ct = default)
+    {
+        if (!ReferenceEquals(ActiveProfile, profile))
+        {
+            ActiveProfile = profile;
+            MessageList = new MessageListViewModel(profile.Store);
+            MessageReader = new MessageReaderViewModel(profile.Store);
+        }
+
+        CurrentFolderScavengeStatus = profile.Store.GetScavengeStatus(node.Folder);
+        await MessageList!.LoadAsync(node.Folder, ct);
     }
 
     public async Task SelectMessageAsync(MessageHeader header, CancellationToken ct = default)
@@ -59,11 +81,8 @@ public partial class MainWindowViewModel : ObservableObject
             await MessageReader.LoadAsync(header.Id, ct);
     }
 
-    public async Task RunScavengeAsync(FolderNodeViewModel node, IProgress<double>? progress = null, CancellationToken ct = default)
+    public async Task RunScavengeAsync(ProfileViewModel profile, FolderNodeViewModel node, IProgress<double>? progress = null, CancellationToken ct = default)
     {
-        if (Store is null)
-            return;
-
-        CurrentFolderScavengeStatus = await Store.ScavengeAsync(node.Folder, progress, ct);
+        CurrentFolderScavengeStatus = await profile.Store.ScavengeAsync(node.Folder, progress, ct);
     }
 }

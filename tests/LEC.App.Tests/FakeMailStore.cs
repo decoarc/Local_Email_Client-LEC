@@ -58,5 +58,7 @@ internal sealed class FakeMailStore : IMailStore
 
     public void SetScavengeVisibility(StoreFolder folder, bool visible) => _visibility = visible;
 
-    public void Dispose() { }
+    public bool WasDisposed { get; private set; }
+
+    public void Dispose() => WasDisposed = true;
 }
