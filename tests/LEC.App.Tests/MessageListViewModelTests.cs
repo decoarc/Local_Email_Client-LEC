@@ -1,4 +1,5 @@
 // tests/LEC.App.Tests/MessageListViewModelTests.cs
+using System.Linq;
 using LEC.App.ViewModels;
 using LEC.MailStore;
 using Xunit;
@@ -55,5 +56,22 @@ public class MessageListViewModelTests
 
         await vm.LoadAsync(folderB);
         Assert.Empty(vm.Messages);
+    }
+
+    [Fact]
+    public async Task SortsMessagesNewestFirstByDate()
+    {
+        var folder = new StoreFolder { Id = 1, Name = "Caixa de entrada", IsLoadable = true };
+        var older = new MessageHeader { Id = new MessageRef(1, 1), Subject = "Antigo", Date = new DateTime(2001, 1, 1) };
+        var newer = new MessageHeader { Id = new MessageRef(1, 2), Subject = "Novo", Date = new DateTime(2005, 1, 1) };
+        var noDate = new MessageHeader { Id = new MessageRef(1, 3), Subject = "SemData", Date = null };
+        var store = new FakeMailStore(
+            folders: new[] { folder },
+            headersByFolder: new() { [1] = new() { older, newer, noDate } }); // deliberately out of order
+
+        var vm = new MessageListViewModel(store);
+        await vm.LoadAsync(folder);
+
+        Assert.Equal(new[] { "Novo", "Antigo", "SemData" }, vm.Messages.Select(m => m.Subject));
     }
 }
