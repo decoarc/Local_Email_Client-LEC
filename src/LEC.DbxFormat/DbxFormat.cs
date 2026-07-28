@@ -51,4 +51,12 @@ public static class DbxFormat
     public const int MessageBlockNextOffset = 12; // int32: file offset of the next block, or 0 if last
     public const int MessageBlockDataOffset = 16;
     public const int MessageBlockMaxDataSize = 0x200; // 512 bytes
+
+    // ---- Message block header fields used only for scavenging (Fase 3) ----
+    // Fase 1 never read these -- it only ever followed pointers already trusted from
+    // the index tree. For scavenging raw, untrusted bytes, they're the primary defense
+    // against false positives: verified against 1,639 real block headers across 3 files
+    // in BCP/ (100% match, including mid-chain and chain-end blocks, not just chain starts).
+    public const int MessageBlockSelfOffsetOffset = 0; // int32: must equal the block's own file offset
+    public const int MessageBlockMarkerOffset = 4;     // int32: fixed marker, always equals MessageBlockMaxDataSize
 }
