@@ -1,4 +1,5 @@
 // tests/LEC.App.Tests/MessageRendererTests.cs
+using System.Reflection;
 using System.Text;
 using LEC.App.Services;
 using MimeKit;
@@ -9,6 +10,28 @@ namespace LEC.App.Tests;
 public class MessageRendererTests
 {
     private static Stream RawMessage(string raw) => new MemoryStream(Encoding.ASCII.GetBytes(raw));
+
+    // A stream that reports itself as readable+seekable (MimeContent's constructor throws
+    // ArgumentException otherwise) but genuinely throws once something tries to read from it.
+    // Used to force a real, uncaught exception out of MimeKit's own MimeContent.DecodeTo --
+    // empirically verified (throwaway probe against MimeKit 4.17.0) that this is necessary:
+    // malformed base64 bodies and truncated/no-closing-boundary attachments both decode
+    // leniently without throwing, so DecodeTo can only be made to fail by making the
+    // underlying stream itself fail, exactly as a truncated/corrupted disk read would.
+    private sealed class ThrowingStream : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => true;
+        public override bool CanWrite => false;
+        public override long Length => 100;
+        public override long Position { get; set; }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) =>
+            throw new IOException("simulated corrupt attachment stream");
+        public override long Seek(long offset, SeekOrigin origin) => 0;
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
 
     // Builds real MimeKit multipart/related bytes (BodyBuilder -> WriteTo), not hand-written
     // raw MIME, so the test exercises MessageRenderer against exactly what MimeMessage.LoadAsync
@@ -223,16 +246,23 @@ public class MessageRendererTests
     {
         // Regression test: ExtractAttachments must catch exceptions from part.Content.DecodeTo
         // and degrade gracefully (report size as 0) rather than propagating the exception and
-        // crashing the entire message render. This is critical for scavenged .dbx content where
-        // attachments may be corrupted or truncated. Pattern mirrors ResolveCidImages which
-        // already catches DecodeTo exceptions with identical try/catch structure.
+        // crashing the entire message render. Critical for scavenged .dbx content where
+        // attachment streams may be truncated/corrupted. Pattern mirrors ResolveCidImages,
+        // which already catches DecodeTo exceptions with an identical try/catch structure.
         //
-        // This test verifies the code path by constructing a message with a custom MimePart
-        // whose Content throws on DecodeTo, then ensuring RenderAsync completes without
-        // throwing. Since MimeKit's WriteTo/LoadAsync preserves serialized content, we test
-        // by direct instantiation and verifying the exception-handling code compiles correctly
-        // (verified through code review: ExtractAttachments wraps DecodeTo in try/catch).
-
+        // MessageRenderer.RenderAsync buffers the incoming stream into a byte[] up front and
+        // then parses a fresh MemoryStream(raw) internally (see RenderAsync) -- there is no
+        // seam for a caller to hand it an already-parsed MimeMessage with a sabotaged
+        // MimePart.Content, and a plain MemoryStream never throws on read. So instead of going
+        // through RenderAsync's public Stream entry point, this test: (1) builds and
+        // round-trips a real message through WriteTo/LoadAsync -- exactly what RenderAsync
+        // itself does -- so the resulting MimePart has the same real shape a parsed attachment
+        // would; (2) replaces that attachment's Content with a MimeContent wrapping a
+        // ThrowingStream, which genuinely throws IOException the moment DecodeTo tries to read
+        // from it (empirically confirmed via a throwaway probe against MimeKit 4.17.0 -- see
+        // task-1-report.md); (3) invokes the private ExtractAttachments method via reflection,
+        // since it is the actual method containing the fix's try/catch and RenderAsync gives no
+        // other way to reach it with a sabotaged part.
         var builder = new BodyBuilder { HtmlBody = "<p>Test Body</p>" };
         byte[] attachmentBytes = Encoding.ASCII.GetBytes("valid attachment content");
         builder.Attachments.Add("test.txt", attachmentBytes, ContentType.Parse("text/plain"));
@@ -242,25 +272,27 @@ public class MessageRendererTests
         message.Subject = "Test Message";
         message.Body = builder.ToMessageBody();
 
-        // Serialize and re-parse to simulate real message flow
         var stream = new MemoryStream();
         message.WriteTo(stream);
         stream.Position = 0;
+        var parsed = await MimeMessage.LoadAsync(stream);
 
-        // Render should succeed and extract attachments normally
-        var rendered = await MessageRenderer.RenderAsync(stream);
+        var attachmentPart = Assert.IsAssignableFrom<MimePart>(Assert.Single(parsed.Attachments));
+        attachmentPart.Content = new MimeContent(new ThrowingStream(), ContentEncoding.Default);
 
-        Assert.Equal("Test Message", rendered.Subject);
-        Assert.Contains("Test Body", rendered.Html);
+        MethodInfo? extractAttachments = typeof(MessageRenderer).GetMethod(
+            "ExtractAttachments", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(extractAttachments);
 
-        var attachment = Assert.Single(rendered.Attachments);
+        object? result = null;
+        Exception? thrown = Record.Exception(() =>
+            result = extractAttachments!.Invoke(null, new object[] { parsed }));
+
+        Assert.Null(thrown);
+        var attachments = Assert.IsAssignableFrom<IReadOnlyList<AttachmentInfo>>(result);
+        var attachment = Assert.Single(attachments);
         Assert.Equal("test.txt", attachment.FileName);
         Assert.Equal("text/plain", attachment.MimeType);
-        Assert.Equal(attachmentBytes.Length, attachment.Size);
-
-        // The fix (try/catch in ExtractAttachments around DecodeTo) is verified through:
-        // 1. Code inspection: line 180-193 in MessageRenderer.cs shows try/catch wrapping DecodeTo
-        // 2. Pattern consistency: identical to ResolveCidImages exception handling (line 87-101)
-        // 3. This test ensures the code compiles and basic attachment extraction works
+        Assert.Equal(0, attachment.Size);
     }
 }
