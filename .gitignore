@@ -9,3 +9,6 @@ BCP/
 
 # Scratch state for the brainstorming skill's visual companion (mockups, not deliverables).
 /.superpowers/
+
+# Isolated workspaces for subagent-driven plan execution.
+/.worktrees/
