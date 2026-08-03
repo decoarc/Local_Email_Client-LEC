@@ -32,6 +32,38 @@ public sealed class DbxStore : IMailStore
 
     private static readonly char[] InvalidFileNameChars = { '\\', '/', ':', '*', '?', '"', '<', '>', '|' };
 
+    // Windows redirects file I/O for these names (with or without an extension — "CON.txt"
+    // is just as reserved as "CON") to a device instead of a real file, so a sanitized
+    // folder name matching one of these, case-insensitively, must be rejected up front:
+    // otherwise Folders.dbx would end up with an entry pointing at something that isn't a
+    // real message store.
+    private static readonly HashSet<string> ReservedDeviceNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "CON", "PRN", "AUX", "NUL",
+        "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+        "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    };
+
+    private static bool IsReservedDeviceName(string name)
+    {
+        int dot = name.IndexOf('.');
+        string stem = dot < 0 ? name : name[..dot];
+        return ReservedDeviceNames.Contains(stem);
+    }
+
+    /// <summary>
+    /// Creates a new folder: a "&lt;name&gt;.dbx" backing file plus an entry added into a
+    /// from-scratch rewrite of Folders.dbx (see <see cref="DbxFolderFileWriter.Rebuild"/>).
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when: <paramref name="parentId"/> does not match any existing folder; the
+    /// sanitized <paramref name="name"/> is blank; the sanitized name is a Windows-reserved
+    /// device name (CON, PRN, AUX, NUL, COM1-9, LPT1-9, case-insensitive); a sibling folder
+    /// (same parent) already has this name (case-insensitive); the backing "&lt;name&gt;.dbx"
+    /// file already exists in this profile; or Folders.dbx on disk is damaged
+    /// (<c>Health != StoreHealth.Ok</c>), since rebuilding it in that state would silently
+    /// discard whatever folders this reader couldn't parse.
+    /// </exception>
     public Task<StoreFolder> CreateFolderAsync(string name, int? parentId, CancellationToken ct = default)
     {
         return Task.Run(() =>
@@ -43,7 +75,10 @@ public sealed class DbxStore : IMailStore
             if (sanitizedName.Length == 0)
                 throw new InvalidOperationException($"Nome de pasta inválido: \"{name}\".");
 
-            if (_folders.Any(f => f.ParentId == parentId && f.Name == sanitizedName))
+            if (IsReservedDeviceName(sanitizedName))
+                throw new InvalidOperationException($"\"{sanitizedName}\" é um nome reservado do Windows e não pode ser usado como nome de pasta.");
+
+            if (_folders.Any(f => f.ParentId == parentId && string.Equals(f.Name, sanitizedName, StringComparison.OrdinalIgnoreCase)))
                 throw new InvalidOperationException($"Já existe uma pasta chamada \"{sanitizedName}\" no mesmo nível.");
 
             string fileName = sanitizedName + ".dbx";
@@ -51,38 +86,67 @@ public sealed class DbxStore : IMailStore
             if (File.Exists(filePath))
                 throw new InvalidOperationException($"Já existe um arquivo \"{fileName}\" neste perfil.");
 
-            int newId = _folders.Count == 0 ? 1 : _folders.Max(f => f.Id) + 1;
-
-            DbxEmailFileWriter.CreateEmpty(filePath);
-
             string foldersDbxPath = Path.Combine(_profileDirectory, "Folders.dbx");
-            File.Copy(foldersDbxPath, foldersDbxPath + ".bak", overwrite: true);
 
             List<DbxFolderWriteEntry> entries;
             using (var current = DbxFolderFile.Open(foldersDbxPath))
             {
+                // Must be checked before touching current.Folders at all, and before any
+                // file (including the new backing .dbx) is created: DbxFolderFile.Open
+                // silently drops folders it couldn't parse when the file is damaged, so
+                // rebuilding from a Partial-health read would permanently discard them.
+                if (current.Health != StoreHealth.Ok)
+                    throw new InvalidOperationException(
+                        "Folders.dbx está danificado; criar pastas reescreveria o arquivo e descartaria as pastas ilegíveis.");
+
                 entries = current.Folders
                     .Select(f => new DbxFolderWriteEntry(f.FolderId, f.ParentId, f.Name ?? "", f.FileName,
                         f.Flags, f.MessageCount, f.SpecialFolderType))
                     .ToList();
             }
-            entries.Add(new DbxFolderWriteEntry(newId, parentId ?? -1, sanitizedName, fileName));
 
-            DbxFolderFileWriter.Rebuild(foldersDbxPath, entries);
+            int newId = entries.Count == 0 ? 1 : entries.Max(e => e.FolderId) + 1;
 
-            var created = new StoreFolder
+            DbxEmailFileWriter.CreateEmpty(filePath);
+            try
             {
-                Id = newId,
-                ParentId = parentId,
-                Name = sanitizedName,
-                SpecialFolderKind = SpecialFolderKind.None,
-                MessageCount = 0,
-                IsLoadable = true,
-            };
-            _folders.Add(created);
-            _backingFileNames[newId] = fileName;
+                // Write-once permanent copy of the very first, pristine, real
+                // Outlook-Express-authored Folders.dbx — never overwritten again, so it
+                // survives even after many later folder creations roll the ".bak" copy.
+                string pristinePath = foldersDbxPath + ".original";
+                if (!File.Exists(pristinePath))
+                    File.Copy(foldersDbxPath, pristinePath);
 
-            return created;
+                File.Copy(foldersDbxPath, foldersDbxPath + ".bak", overwrite: true);
+
+                entries.Add(new DbxFolderWriteEntry(newId, parentId ?? -1, sanitizedName, fileName));
+                DbxFolderFileWriter.Rebuild(foldersDbxPath, entries);
+
+                var created = new StoreFolder
+                {
+                    Id = newId,
+                    ParentId = parentId,
+                    Name = sanitizedName,
+                    SpecialFolderKind = SpecialFolderKind.None,
+                    MessageCount = 0,
+                    IsLoadable = true,
+                };
+                // Not thread-safe: assumes no concurrent reader of _folders/_backingFileNames
+                // from another thread. Fine today — there's no UI consuming Folders
+                // concurrently yet — but a future concern if that changes.
+                _folders.Add(created);
+                _backingFileNames[newId] = fileName;
+
+                return created;
+            }
+            catch
+            {
+                // The backing .dbx file was created above; if anything after that point
+                // failed, remove it so CreateFolderAsync's own File.Exists guard doesn't
+                // permanently block re-creating a folder with this name.
+                try { File.Delete(filePath); } catch { /* best-effort cleanup */ }
+                throw;
+            }
         }, ct);
     }
 

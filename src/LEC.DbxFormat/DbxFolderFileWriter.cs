@@ -27,6 +27,9 @@ public static class DbxFolderFileWriter
 {
     public static void Rebuild(string path, IReadOnlyList<DbxFolderWriteEntry> folders)
     {
+        if (folders.Count > byte.MaxValue)
+            throw new ArgumentException($"Folders.dbx flat-node format holds at most {byte.MaxValue} folders; got {folders.Count}.", nameof(folders));
+
         var bytes = new List<byte>(new byte[DbxFormat.HeaderIndexPointerOffset + 4]);
 
         WriteUInt32(bytes, 0, DbxFormat.SignatureWord0);
@@ -54,14 +57,14 @@ public static class DbxFolderFileWriter
 
         var attrs = new List<(byte FieldId, bool Direct, uint DirectValue, byte[]? Data)>
         {
-            ((byte)DbxFolderFieldId.FolderId, true, unchecked((uint)folder.FolderId), null),
+            DirectOrPointer(DbxFolderFieldId.FolderId, folder.FolderId),
             ((byte)DbxFolderFieldId.ParentId, false, 0, BitConverter.GetBytes(folder.ParentId)),
             ((byte)DbxFolderFieldId.Name, false, 0, EncodeString(folder.Name)),
         };
         if (folder.FileName is not null)
             attrs.Add(((byte)DbxFolderFieldId.FileName, false, 0, EncodeString(folder.FileName)));
-        attrs.Add(((byte)DbxFolderFieldId.Flags, true, unchecked((uint)folder.Flags), null));
-        attrs.Add(((byte)DbxFolderFieldId.MessageCount, true, unchecked((uint)folder.MessageCount), null));
+        attrs.Add(DirectOrPointer(DbxFolderFieldId.Flags, folder.Flags));
+        attrs.Add(DirectOrPointer(DbxFolderFieldId.MessageCount, folder.MessageCount));
         attrs.Add(((byte)DbxFolderFieldId.SpecialFolderType, true, unchecked((uint)folder.SpecialFolderType), null));
 
         // Info-node header: 8 unused bytes, then a count word at +8 whose byte at +2 (i.e.
@@ -125,6 +128,17 @@ public static class DbxFolderFileWriter
 
         return start;
     }
+
+    // Direct-form embeds the value in the packed record's 24-bit payload
+    // (DbxFormat.AttributeValueMask) — anything wider (or negative) must go pointer-form
+    // instead, or it silently truncates. Confirmed to matter on real data: BCP/Folders.dbx
+    // already has folders whose Flags need bit 24+ (e.g. 0x800010, 0x900019).
+    private static bool FitsDirect(int value) => value >= 0 && (value & ~(int)DbxFormat.AttributeValueMask) == 0;
+
+    private static (byte FieldId, bool Direct, uint DirectValue, byte[]? Data) DirectOrPointer(DbxFolderFieldId fieldId, int value) =>
+        FitsDirect(value)
+            ? ((byte)fieldId, true, unchecked((uint)value), null)
+            : ((byte)fieldId, false, 0, BitConverter.GetBytes(value));
 
     private static byte[] EncodeString(string value) => System.Text.Encoding.UTF8.GetBytes(value + "\0");
 

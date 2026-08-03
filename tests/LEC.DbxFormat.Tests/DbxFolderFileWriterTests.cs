@@ -44,6 +44,68 @@ public class DbxFolderFileWriterTests
     }
 
     [Fact]
+    public void RebuildRoundTripsAFlagsValueThatNeedsPointerForm()
+    {
+        // 0x01ABCDEF doesn't fit in the packed record's 24-bit direct payload
+        // (DbxFormat.AttributeValueMask) — it must be written pointer-form, exactly like
+        // real BCP/Folders.dbx folders whose Flags already require it (e.g. 0x800010).
+        string path = Path.Combine(Path.GetTempPath(), $"lec-folders-{Guid.NewGuid():N}.dbx");
+        try
+        {
+            const int flagsNeedingPointerForm = 0x01ABCDEF;
+            var entries = new[]
+            {
+                new DbxFolderWriteEntry(1, ParentId: -1, Name: "Pastas locais", FileName: null,
+                    Flags: flagsNeedingPointerForm),
+            };
+
+            DbxFolderFileWriter.Rebuild(path, entries);
+
+            using var file = DbxFolderFile.Open(path);
+            Assert.Equal(StoreHealth.Ok, file.Health);
+            var folder = file.Folders.Single(f => f.FolderId == 1);
+            Assert.Equal(flagsNeedingPointerForm, folder.Flags);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void RebuildWithNoFoldersProducesAnEmptyButHealthyFile()
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"lec-folders-{Guid.NewGuid():N}.dbx");
+        try
+        {
+            DbxFolderFileWriter.Rebuild(path, Array.Empty<DbxFolderWriteEntry>());
+
+            using var file = DbxFolderFile.Open(path);
+            Assert.Equal(StoreHealth.Ok, file.Health);
+            Assert.Empty(file.Folders);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void RebuildThrowsWhenGivenMoreThan255Folders()
+    {
+        // The flat-node format's ptrCount is a single byte (up to 255 folders fit); writing
+        // (byte)folders.Count for 256 would silently wrap to 0, making every folder invisible
+        // on the very file that was just overwritten. Must fail loudly instead.
+        var entries = Enumerable.Range(1, 256)
+            .Select(i => new DbxFolderWriteEntry(i, ParentId: -1, Name: $"Pasta {i}", FileName: null))
+            .ToArray();
+
+        string path = Path.Combine(Path.GetTempPath(), $"lec-folders-{Guid.NewGuid():N}.dbx");
+        Assert.Throws<ArgumentException>(() => DbxFolderFileWriter.Rebuild(path, entries));
+        Assert.False(File.Exists(path));
+    }
+
+    [Fact]
     public void RebuildOverwritesAnExistingFileAndLeavesNoTempFileBehind()
     {
         string dir = Path.Combine(Path.GetTempPath(), $"lec-folders-dir-{Guid.NewGuid():N}");
