@@ -6,7 +6,7 @@
         WindowStartupLocation="CenterOwner" ResizeMode="NoResize" ShowInTaskbar="False">
     <StackPanel Margin="16">
         <TextBlock Text="Nome da pasta:" Margin="0,0,0,4"/>
-        <TextBox x:Name="NameTextBox" KeyDown="NameTextBox_KeyDown"/>
+        <TextBox x:Name="NameTextBox"/>
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
             <Button Content="Cancelar" IsCancel="True" Width="80" Margin="0,0,8,0"/>
             <Button Content="Criar" IsDefault="True" Width="80" Click="Ok_Click"/>
