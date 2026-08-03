@@ -58,6 +58,11 @@ internal sealed class FakeMailStore : IMailStore
 
     public void SetScavengeVisibility(StoreFolder folder, bool visible) => _visibility = visible;
 
+    public Task<StoreFolder> CreateFolderAsync(string name, int? parentId, CancellationToken ct = default)
+    {
+        throw new NotImplementedException("FakeMailStore does not implement CreateFolderAsync.");
+    }
+
     public bool WasDisposed { get; private set; }
 
     public void Dispose() => WasDisposed = true;

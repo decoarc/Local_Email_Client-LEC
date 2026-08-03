@@ -42,4 +42,11 @@ public interface IMailStore : IDisposable
 
     /// <summary>Toggles whether a folder's already-scavenged items appear in EnumerateHeadersAsync.</summary>
     void SetScavengeVisibility(StoreFolder folder, bool visible);
+
+    /// <summary>
+    /// Creates a folder — a real backing file plus a new Folders.dbx entry for DbxStore.
+    /// See DbxStore.CreateFolderAsync for the full contract (validation, backups,
+    /// exceptions thrown).
+    /// </summary>
+    Task<StoreFolder> CreateFolderAsync(string name, int? parentId, CancellationToken ct = default);
 }
