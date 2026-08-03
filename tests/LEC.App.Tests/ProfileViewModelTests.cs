@@ -22,4 +22,46 @@ public class ProfileViewModelTests
         Assert.Equal("Raiz", rootNode.DisplayName);
         Assert.Single(rootNode.Children);
     }
+
+    [Fact]
+    public async Task CreateFolderAsyncAddsTheNewFolderToTheTree()
+    {
+        var root = new StoreFolder { Id = 1, Name = "Raiz", IsLoadable = true };
+        var store = new FakeMailStore(folders: new[] { root });
+        var profile = new ProfileViewModel("BCP", @"C:\perfis\BCP", store);
+
+        var created = await profile.CreateFolderAsync("Nova", parentId: null);
+
+        Assert.Null(created.ParentId);
+        Assert.Contains(profile.FolderTree.RootNodes, n => n.Folder.Id == created.Id);
+    }
+
+    [Fact]
+    public async Task CreateFolderAsyncAsASubfolderAddsItUnderTheParentNode()
+    {
+        var root = new StoreFolder { Id = 1, Name = "Raiz", IsLoadable = true };
+        var store = new FakeMailStore(folders: new[] { root });
+        var profile = new ProfileViewModel("BCP", @"C:\perfis\BCP", store);
+
+        var created = await profile.CreateFolderAsync("Filha", parentId: root.Id);
+
+        Assert.Equal(root.Id, created.ParentId);
+        var rootNode = Assert.Single(profile.FolderTree.RootNodes);
+        Assert.Contains(rootNode.Children, n => n.Folder.Id == created.Id);
+    }
+
+    [Fact]
+    public async Task CreateFolderAsyncPropagatesStoreExceptions()
+    {
+        var root = new StoreFolder { Id = 1, Name = "Raiz", IsLoadable = true };
+        var store = new FakeMailStore(folders: new[] { root })
+        {
+            ExceptionToThrowOnCreateFolder = new InvalidOperationException("nome inválido"),
+        };
+        var profile = new ProfileViewModel("BCP", @"C:\perfis\BCP", store);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => profile.CreateFolderAsync("X", parentId: null));
+        Assert.Equal("nome inválido", ex.Message);
+    }
 }

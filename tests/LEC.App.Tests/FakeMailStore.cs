@@ -10,20 +10,24 @@ internal sealed class FakeMailStore : IMailStore
     private readonly Dictionary<int, List<MessageHeader>> _headersByFolder;
     private readonly Dictionary<MessageRef, byte[]> _rawByRef;
 
+    private readonly List<StoreFolder> _folders;
+
     public FakeMailStore(
         IReadOnlyList<StoreFolder> folders,
         Dictionary<int, List<MessageHeader>>? headersByFolder = null,
         Dictionary<MessageRef, byte[]>? rawByRef = null,
         StoreHealth health = StoreHealth.Ok)
     {
-        Folders = folders;
+        _folders = folders.ToList();
         _headersByFolder = headersByFolder ?? new Dictionary<int, List<MessageHeader>>();
         _rawByRef = rawByRef ?? new Dictionary<MessageRef, byte[]>();
         Health = health;
     }
 
-    public IReadOnlyList<StoreFolder> Folders { get; }
+    public IReadOnlyList<StoreFolder> Folders => _folders;
     public StoreHealth Health { get; }
+
+    public Exception? ExceptionToThrowOnCreateFolder { get; set; }
 
     public async IAsyncEnumerable<MessageHeader> EnumerateHeadersAsync(StoreFolder folder, [EnumeratorCancellation] CancellationToken ct = default)
     {
@@ -60,7 +64,12 @@ internal sealed class FakeMailStore : IMailStore
 
     public Task<StoreFolder> CreateFolderAsync(string name, int? parentId, CancellationToken ct = default)
     {
-        throw new NotImplementedException("FakeMailStore does not implement CreateFolderAsync.");
+        if (ExceptionToThrowOnCreateFolder is { } ex)
+            throw ex;
+
+        var created = new StoreFolder { Id = _folders.Count + 1, ParentId = parentId, Name = name, IsLoadable = true };
+        _folders.Add(created);
+        return Task.FromResult(created);
     }
 
     public bool WasDisposed { get; private set; }

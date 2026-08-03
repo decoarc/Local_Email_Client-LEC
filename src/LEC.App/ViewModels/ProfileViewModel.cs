@@ -21,4 +21,11 @@ public sealed class ProfileViewModel
         Store = store;
         FolderTree.Build(store.Folders);
     }
+
+    public async Task<StoreFolder> CreateFolderAsync(string name, int? parentId)
+    {
+        var created = await Store.CreateFolderAsync(name, parentId);
+        FolderTree.Build(Store.Folders);
+        return created;
+    }
 }
