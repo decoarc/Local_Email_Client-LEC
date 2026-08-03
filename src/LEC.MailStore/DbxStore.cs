@@ -17,16 +17,73 @@ public sealed class DbxStore : IMailStore
     private readonly Dictionary<int, IReadOnlyList<CachedRecoveredItem>> _recoveredItemsByFolder = new();
     private readonly Dictionary<int, Dictionary<MessageRef, int>> _recoveredByFolder = new();
 
-    public IReadOnlyList<StoreFolder> Folders { get; }
+    private readonly List<StoreFolder> _folders;
+    public IReadOnlyList<StoreFolder> Folders => _folders;
     public StoreHealth Health { get; }
 
-    private DbxStore(string profileDirectory, IReadOnlyList<StoreFolder> folders, Dictionary<int, string?> backingFileNames, StoreHealth health, ScavengeCache scavengeCache)
+    private DbxStore(string profileDirectory, List<StoreFolder> folders, Dictionary<int, string?> backingFileNames, StoreHealth health, ScavengeCache scavengeCache)
     {
         _profileDirectory = profileDirectory;
-        Folders = folders;
+        _folders = folders;
         _backingFileNames = backingFileNames;
         Health = health;
         _scavengeCache = scavengeCache;
+    }
+
+    private static readonly char[] InvalidFileNameChars = { '\\', '/', ':', '*', '?', '"', '<', '>', '|' };
+
+    public Task<StoreFolder> CreateFolderAsync(string name, int? parentId, CancellationToken ct = default)
+    {
+        return Task.Run(() =>
+        {
+            if (parentId is int pid && !_folders.Any(f => f.Id == pid))
+                throw new InvalidOperationException($"Pasta-mãe {pid} não encontrada.");
+
+            string sanitizedName = new string(name.Where(c => Array.IndexOf(InvalidFileNameChars, c) < 0).ToArray()).Trim();
+            if (sanitizedName.Length == 0)
+                throw new InvalidOperationException($"Nome de pasta inválido: \"{name}\".");
+
+            if (_folders.Any(f => f.ParentId == parentId && f.Name == sanitizedName))
+                throw new InvalidOperationException($"Já existe uma pasta chamada \"{sanitizedName}\" no mesmo nível.");
+
+            string fileName = sanitizedName + ".dbx";
+            string filePath = Path.Combine(_profileDirectory, fileName);
+            if (File.Exists(filePath))
+                throw new InvalidOperationException($"Já existe um arquivo \"{fileName}\" neste perfil.");
+
+            int newId = _folders.Count == 0 ? 1 : _folders.Max(f => f.Id) + 1;
+
+            DbxEmailFileWriter.CreateEmpty(filePath);
+
+            string foldersDbxPath = Path.Combine(_profileDirectory, "Folders.dbx");
+            File.Copy(foldersDbxPath, foldersDbxPath + ".bak", overwrite: true);
+
+            List<DbxFolderWriteEntry> entries;
+            using (var current = DbxFolderFile.Open(foldersDbxPath))
+            {
+                entries = current.Folders
+                    .Select(f => new DbxFolderWriteEntry(f.FolderId, f.ParentId, f.Name ?? "", f.FileName,
+                        f.Flags, f.MessageCount, f.SpecialFolderType))
+                    .ToList();
+            }
+            entries.Add(new DbxFolderWriteEntry(newId, parentId ?? -1, sanitizedName, fileName));
+
+            DbxFolderFileWriter.Rebuild(foldersDbxPath, entries);
+
+            var created = new StoreFolder
+            {
+                Id = newId,
+                ParentId = parentId,
+                Name = sanitizedName,
+                SpecialFolderKind = SpecialFolderKind.None,
+                MessageCount = 0,
+                IsLoadable = true,
+            };
+            _folders.Add(created);
+            _backingFileNames[newId] = fileName;
+
+            return created;
+        }, ct);
     }
 
     public static DbxStore Open(string profileDirectoryPath, string? scavengeCacheDatabasePath = null)
