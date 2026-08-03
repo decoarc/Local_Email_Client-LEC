@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Runtime.CompilerServices;
 using LEC.DbxFormat;
 using LEC.MailStore;
@@ -67,7 +68,13 @@ internal sealed class FakeMailStore : IMailStore
         if (ExceptionToThrowOnCreateFolder is { } ex)
             throw ex;
 
-        var created = new StoreFolder { Id = _folders.Count + 1, ParentId = parentId, Name = name, IsLoadable = true };
+        var created = new StoreFolder
+        {
+            Id = _folders.Count == 0 ? 1 : _folders.Max(f => f.Id) + 1,
+            ParentId = parentId,
+            Name = name,
+            IsLoadable = true,
+        };
         _folders.Add(created);
         return Task.FromResult(created);
     }

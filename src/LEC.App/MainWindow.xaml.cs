@@ -277,33 +277,55 @@ public partial class MainWindow : Window
             return;
         if ((sender as MenuItem)?.Parent is not ContextMenu { PlacementTarget: FrameworkElement placementTarget })
             return;
-        if (FindAncestor<TreeView>(placementTarget) is not { DataContext: ProfileViewModel profile })
+        if (FindAncestor<TreeView>(placementTarget) is not { DataContext: ProfileViewModel profile } treeView)
             return;
 
-        _ = CreateFolderAsync(profile, node.Folder.Id);
+        _ = CreateFolderAsync(profile, node.Folder.Id, treeView);
     }
 
     private void NewTopLevelFolder_Click(object sender, RoutedEventArgs e)
     {
-        if ((sender as MenuItem)?.Parent is not ContextMenu { PlacementTarget: FrameworkElement { DataContext: ProfileViewModel profile } })
+        if ((sender as MenuItem)?.Parent is not ContextMenu { PlacementTarget: TreeView { DataContext: ProfileViewModel profile } treeView })
             return;
 
-        _ = CreateFolderAsync(profile, parentId: null);
+        _ = CreateFolderAsync(profile, parentId: null, treeView);
     }
 
-    private async Task CreateFolderAsync(ProfileViewModel profile, int? parentId)
+    private async Task CreateFolderAsync(ProfileViewModel profile, int? parentId, TreeView treeView)
     {
         var dialog = new NewFolderDialog { Owner = this };
         if (dialog.ShowDialog() != true)
             return;
 
+        // DbxStore.CreateFolderAsync mutates its internal folder list on a background
+        // thread (Task.Run) without locking. Disabling this tree for the duration closes
+        // the one realistic way a concurrent read could happen: the user clicking a
+        // different node in the SAME tree while this create is in flight.
+        treeView.IsEnabled = false;
         try
         {
             await profile.CreateFolderAsync(dialog.FolderName, parentId);
+
+            // FolderTree.Build (inside profile.CreateFolderAsync) just replaced every node
+            // in this tree with a brand-new instance — any node this window had cached as
+            // "selected" for this profile is now detached from every tree. Reset the same
+            // selection state CloseProfile_Click resets when a profile closes, but without
+            // touching _selectedProfile itself (the profile is still open).
+            if (ReferenceEquals(_selectedProfile, profile))
+            {
+                _selectedNode = null;
+                _selectedTreeView = null;
+                ScavengeButton.Visibility = Visibility.Collapsed;
+                RecoverableBar.Visibility = Visibility.Collapsed;
+            }
         }
         catch (Exception ex)
         {
             MessageBox.Show(this, ex.Message, "LEC — Não foi possível criar a pasta", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            treeView.IsEnabled = true;
         }
     }
 

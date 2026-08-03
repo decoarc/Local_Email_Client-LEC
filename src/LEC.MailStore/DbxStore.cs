@@ -131,9 +131,13 @@ public sealed class DbxStore : IMailStore
                     MessageCount = 0,
                     IsLoadable = true,
                 };
-                // Not thread-safe: assumes no concurrent reader of _folders/_backingFileNames
-                // from another thread. Fine today — there's no UI consuming Folders
-                // concurrently yet — but a future concern if that changes.
+                // Not thread-safe: _folders/_backingFileNames are plain collections, not
+                // synchronized. The current UI caller (MainWindow.CreateFolderAsync)
+                // disables the affected tree for the duration of this call specifically to
+                // prevent a concurrent read from a UI click racing this write — that
+                // mitigation lives at the call site, not here, so any future caller of
+                // CreateFolderAsync must provide the same guarantee (or this needs a real
+                // lock around these two collections).
                 _folders.Add(created);
                 _backingFileNames[newId] = fileName;
 
