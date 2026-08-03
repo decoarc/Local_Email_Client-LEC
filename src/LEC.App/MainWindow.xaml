@@ -48,12 +48,23 @@
                                           BorderThickness="0"
                                           ScrollViewer.VerticalScrollBarVisibility="Disabled"
                                           ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                    <TreeView.ContextMenu>
+                                        <ContextMenu>
+                                            <MenuItem Header="Nova pasta..." Click="NewTopLevelFolder_Click"/>
+                                        </ContextMenu>
+                                    </TreeView.ContextMenu>
                                     <TreeView.ItemTemplate>
                                         <HierarchicalDataTemplate ItemsSource="{Binding Children}">
                                             <TextBlock Text="{Binding DisplayName}"
                                                        Foreground="{Binding IsLoadable, Converter={StaticResource LoadableToBrushConverter}}"
                                                        FontWeight="{Binding IsSpecial, Converter={StaticResource SpecialToFontWeightConverter}}"
-                                                       ToolTip="{Binding IsLoadable, Converter={StaticResource NotLoadableTooltipConverter}}"/>
+                                                       ToolTip="{Binding IsLoadable, Converter={StaticResource NotLoadableTooltipConverter}}">
+                                                <TextBlock.ContextMenu>
+                                                    <ContextMenu>
+                                                        <MenuItem Header="Nova subpasta aqui..." Click="NewSubfolder_Click"/>
+                                                    </ContextMenu>
+                                                </TextBlock.ContextMenu>
+                                            </TextBlock>
                                         </HierarchicalDataTemplate>
                                     </TreeView.ItemTemplate>
                                 </TreeView>

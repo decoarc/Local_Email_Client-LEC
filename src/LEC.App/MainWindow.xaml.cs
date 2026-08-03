@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
 using LEC.App.Services;
 using LEC.App.ViewModels;
 using LEC.DbxFormat;
@@ -267,6 +268,55 @@ public partial class MainWindow : Window
             }
         }
 
+        return null;
+    }
+
+    private void NewSubfolder_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as MenuItem)?.DataContext is not FolderNodeViewModel node)
+            return;
+        if ((sender as MenuItem)?.Parent is not ContextMenu { PlacementTarget: FrameworkElement placementTarget })
+            return;
+        if (FindAncestor<TreeView>(placementTarget) is not { DataContext: ProfileViewModel profile })
+            return;
+
+        _ = CreateFolderAsync(profile, node.Folder.Id);
+    }
+
+    private void NewTopLevelFolder_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as MenuItem)?.Parent is not ContextMenu { PlacementTarget: FrameworkElement { DataContext: ProfileViewModel profile } })
+            return;
+
+        _ = CreateFolderAsync(profile, parentId: null);
+    }
+
+    private async Task CreateFolderAsync(ProfileViewModel profile, int? parentId)
+    {
+        var dialog = new NewFolderDialog { Owner = this };
+        if (dialog.ShowDialog() != true)
+            return;
+
+        try
+        {
+            await profile.CreateFolderAsync(dialog.FolderName, parentId);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "LEC — Não foi possível criar a pasta", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    // Percorre a árvore visual a partir de `start` até achar um ancestral do tipo T --
+    // necessário porque um ContextMenu não está na mesma árvore visual do elemento que
+    // abriu ele (é uma Popup separada); PlacementTarget é o único elo de volta.
+    private static T? FindAncestor<T>(DependencyObject start) where T : DependencyObject
+    {
+        for (var current = start; current is not null; current = VisualTreeHelper.GetParent(current))
+        {
+            if (current is T match)
+                return match;
+        }
         return null;
     }
 
