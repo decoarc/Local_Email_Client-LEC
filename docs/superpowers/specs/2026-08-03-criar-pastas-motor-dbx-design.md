@@ -49,7 +49,8 @@ Nó de índice único (`IndexNodeHeaderSize` = 24 bytes de cabeçalho):
 
 Info-node por pasta, logo em seguida (formato de `DbxAttributeReader`/`DbxFolderInfo`):
 - Array de registros de atributo (4 bytes cada, packed: byte de tipo com `AttributeDirectFlag` + `DbxFolderFieldId` nos 7 bits baixos, valor de 24 bits).
-- `FolderId`, `ParentId`, `Flags` (= 0), `MessageCount` (= 0), `SpecialFolderType` (= `None`/0): gravados **diretos** (`AttributeDirectFlag` setado, valor embutido nos 24 bits — cabem folgado).
+- `FolderId`, `Flags` (= 0), `MessageCount` (= 0), `SpecialFolderType` (= `None`/0): gravados **diretos** (`AttributeDirectFlag` setado, valor embutido nos 24 bits — cabem folgado).
+- `ParentId`: gravado **sempre por ponteiro** (int32 de 4 bytes reais na área de dados), nunca direto — o sentinela de raiz (`-1`) não cabe no formato direto de 24 bits (`AttributeValueMask`); gravar todo `ParentId` por ponteiro (em vez de só o caso `-1`) evita ter dois caminhos de código para o mesmo campo. Mesma convenção já usada em `DbxStoreTests.OpensAProfileAndMapsFolders`.
 - `Name`, `FileName`: gravados **por ponteiro** (`AttributeDirectFlag` limpo), apontando (relativo ao fim do array de atributos daquele info-node) pra bytes UTF-8 (`DbxStringDecoder`-compatível: sem BOM) terminados em `\0`, numa área de dados logo após o array.
 - `NodeKind` (`0x0A`): omitido — `DbxFolderInfo.Read` não expõe esse campo, o leitor não depende dele.
 - Contagem de atributos gravada no formato de `InfoNodeCountWordOffset`/`InfoNodeCountMask`/`InfoNodeCountShift` (byte na posição +2 do int32 em `+8`); bytes 0-7 e os demais 3 bytes do int em `+8` zerados (reservados, não lidos por `DbxAttributeReader`).
