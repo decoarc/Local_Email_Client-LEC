@@ -63,4 +63,22 @@ public class MoveDestinationRulesTests
 
         Assert.True(MoveDestinationRules.IsValidDestination(otherFolder, profile, profile, sourceFolderId: 1));
     }
+
+    [Fact]
+    public void AFolderIsValidEvenWhenItsParentHasNoBackingFile()
+    {
+        // IsValidDestination only ever looks at the folder it's given -- never at ancestors
+        // -- so a folder nested under an invalid placeholder root (e.g. "Pastas locais")
+        // must still be independently valid. The UI is responsible for not blocking access
+        // to it: MoveMessageDialog grays the header instead of disabling the TreeViewItem
+        // container, because disabling would cascade to children in WPF (IsEnabled coerces
+        // down the visual tree) and make the whole subtree unreachable.
+        var root = new StoreFolder { Id = 1, Name = "Pastas locais", IsLoadable = true, HasBackingFile = false };
+        var child = new StoreFolder { Id = 2, ParentId = 1, Name = "Caixa de entrada", IsLoadable = true, HasBackingFile = true };
+        var profile = MakeProfile("P", root, child);
+        var sourceProfile = MakeProfile("Origem", new StoreFolder { Id = 99, Name = "Origem", IsLoadable = true, HasBackingFile = true });
+
+        Assert.False(MoveDestinationRules.IsValidDestination(root, profile, sourceProfile, sourceFolderId: 99));
+        Assert.True(MoveDestinationRules.IsValidDestination(child, profile, sourceProfile, sourceFolderId: 99));
+    }
 }

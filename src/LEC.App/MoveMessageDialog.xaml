@@ -25,21 +25,16 @@
                                       BorderThickness="0"
                                       ScrollViewer.VerticalScrollBarVisibility="Disabled"
                                       ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-                                <TreeView.ItemContainerStyle>
-                                    <Style TargetType="TreeViewItem">
-                                        <Setter Property="IsEnabled">
-                                            <Setter.Value>
+                                <TreeView.ItemTemplate>
+                                    <HierarchicalDataTemplate ItemsSource="{Binding Children}">
+                                        <TextBlock Text="{Binding DisplayName}">
+                                            <TextBlock.Foreground>
                                                 <MultiBinding Converter="{StaticResource ValidityConverter}">
                                                     <Binding Path="Folder"/>
                                                     <Binding Path="DataContext" RelativeSource="{RelativeSource AncestorType=TreeView}"/>
                                                 </MultiBinding>
-                                            </Setter.Value>
-                                        </Setter>
-                                    </Style>
-                                </TreeView.ItemContainerStyle>
-                                <TreeView.ItemTemplate>
-                                    <HierarchicalDataTemplate ItemsSource="{Binding Children}">
-                                        <TextBlock Text="{Binding DisplayName}"/>
+                                            </TextBlock.Foreground>
+                                        </TextBlock>
                                     </HierarchicalDataTemplate>
                                 </TreeView.ItemTemplate>
                             </TreeView>
