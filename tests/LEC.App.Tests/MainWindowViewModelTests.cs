@@ -250,4 +250,26 @@ public class MainWindowViewModelTests
 
         Assert.Empty(sourceStore.HiddenMessageRefs);
     }
+
+    [Fact]
+    public async Task MoveMessageAsyncIntoTheMessagesOwnFolderThrowsAndTouchesNothing()
+    {
+        var folder = new StoreFolder { Id = 1, Name = "A", IsLoadable = true };
+        var messageRef = new MessageRef(folder.Id, 500);
+        var store = new FakeMailStore(
+            folders: new[] { folder },
+            rawByRef: new Dictionary<MessageRef, byte[]> { [messageRef] = "x"u8.ToArray() });
+        var profile = new ProfileViewModel("P", @"C:\perfis\P", store);
+
+        var header = new MessageHeader { Id = messageRef, Subject = "S" };
+        var viewModel = new MainWindowViewModel();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => viewModel.MoveMessageAsync(profile, header, profile, folder.Id));
+
+        // The guard must run before any I/O: a self-move would otherwise rebuild the folder
+        // with a duplicate copy and then hide the original at an offset the rebuild invalidated.
+        Assert.Empty(store.AddedMessages);
+        Assert.Empty(store.HiddenMessageRefs);
+    }
 }

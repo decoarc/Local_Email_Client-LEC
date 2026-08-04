@@ -171,6 +171,14 @@ public sealed class DbxStore : IMailStore
     /// <see cref="DbxEmailFileWriter.Rebuild"/> throws <see cref="ArgumentException"/> instead
     /// — not caught or rewrapped here.
     /// </exception>
+    /// <remarks>
+    /// Not thread-safe: this mutates shared, unsynchronized in-memory state (_openFolders,
+    /// _messagesByFolder, _hiddenOffsetsByFolder, _scavengeStatusByFolder,
+    /// _recoveredItemsByFolder, _recoveredByFolder) as well as the folder's .dbx on disk.
+    /// Concurrent calls against the same DbxStore instance — including a concurrent
+    /// EnumerateHeadersAsync/OpenMessageAsync on the same folder — must be serialized by the
+    /// caller, exactly as CreateFolderAsync already requires.
+    /// </remarks>
     public Task AddMessageAsync(int folderId, byte[] rawMessage, string? subject, string? senderName,
         string? senderAddress, string? messageId, DateTime? dateUtc, CancellationToken ct = default)
     {
@@ -194,7 +202,8 @@ public sealed class DbxStore : IMailStore
                 entries = current.Messages
                     .Select(info => new DbxMessageWriteEntry(
                         current.ReadMessageRaw(info, out _), info.Subject, info.SenderName, info.SenderAddress,
-                        info.MessageId, info.SendTimeUtc ?? info.ReceiveTimeUtc, info.Flags))
+                        info.MessageId, info.SendTimeUtc, info.Flags,
+                        info.ReceiverName, info.ReceiverAddress, info.ReceiveTimeUtc))
                     .ToList();
             }
 
@@ -203,8 +212,35 @@ public sealed class DbxStore : IMailStore
                 File.Copy(filePath, pristinePath);
             File.Copy(filePath, filePath + ".bak", overwrite: true);
 
+            // EnumerateHeadersAsync caches an open DbxEmailFile (FileStream + memory-mapped
+            // section) per folder in _openFolders, released only on Dispose(). If this folder
+            // was ever browsed -- the normal path when the user clicks the destination before
+            // moving into it -- that handle still locks the file and Rebuild's final File.Move
+            // fails with UnauthorizedAccessException. Evict it (and the DbxMessageInfo map
+            // keyed on the about-to-be-invalidated offsets) before rewriting the file.
+            if (_openFolders.Remove(folderId, out var stale))
+                stale.Dispose();
+            _messagesByFolder.Remove(folderId);
+
             entries.Add(new DbxMessageWriteEntry(rawMessage, subject, senderName, senderAddress, messageId, dateUtc));
             DbxEmailFileWriter.Rebuild(filePath, entries);
+
+            // Rebuild rewrote the file from scratch, so every byte offset inside it changed.
+            // Both caches key on offsets into this exact file -- MovedMessageCache on
+            // index_node_offset, ScavengeCache on recovered_item.chain_offset -- so every
+            // cached row for this folder is now meaningless, and a stale offset that
+            // coincidentally matches something in the new layout is *silent* corruption
+            // (a wrong message hidden, a recovered item pointing at unrelated bytes).
+            // Purge rather than try to preserve: losing "this was moved away" back into
+            // view is an accepted, visible, inspectable tradeoff. Re-keying hiding on a
+            // rebuild-stable identity is a deliberately deferred design change.
+            _movedMessageCache.ClearFolder(_profileDirectory, fileName);
+            _hiddenOffsetsByFolder.Remove(folderId);
+
+            _scavengeCache.ClearScan(_profileDirectory, fileName);
+            _scavengeStatusByFolder.Remove(folderId);
+            _recoveredItemsByFolder.Remove(folderId);
+            _recoveredByFolder.Remove(folderId);
         }, ct);
     }
 
@@ -452,6 +488,16 @@ public sealed class DbxStore : IMailStore
         _hiddenOffsetsByFolder[folder.Id] = _movedMessageCache.GetMovedOffsets(_profileDirectory, fileName);
     }
 
+    /// <summary>
+    /// Records that a message was moved away from its folder, so EnumerateHeadersAsync stops
+    /// listing it — the source .dbx itself is never touched.
+    /// </summary>
+    /// <remarks>
+    /// Not thread-safe: this mutates the unsynchronized _hiddenOffsetsByFolder dictionary
+    /// (and writes to the shared MovedMessageCache connection). Concurrent calls against the
+    /// same DbxStore instance must be serialized by the caller, exactly as CreateFolderAsync
+    /// and AddMessageAsync already require.
+    /// </remarks>
     public Task HideMovedMessageAsync(MessageRef id, CancellationToken ct = default)
     {
         return Task.Run(() =>

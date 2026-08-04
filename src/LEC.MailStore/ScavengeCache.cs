@@ -152,6 +152,30 @@ public sealed class ScavengeCache : IDisposable
         transaction.Commit();
     }
 
+    /// <summary>
+    /// Drops a folder's whole cached scan — the scan row and every recovered item. Called
+    /// after that folder's .dbx is rebuilt from scratch (see <see cref="DbxStore.AddMessageAsync"/>):
+    /// recovered items are keyed on <c>chain_offset</c>, a raw file offset that a rebuild
+    /// invalidates, so the cached scan no longer describes the bytes it was produced from.
+    /// The folder simply reverts to "never scanned" and can be re-scavenged.
+    /// </summary>
+    public void ClearScan(string profilePath, string folderFile)
+    {
+        using var transaction = _connection.BeginTransaction();
+
+        foreach (string table in new[] { "recovered_item", "scan" })
+        {
+            using var del = _connection.CreateCommand();
+            del.Transaction = transaction;
+            del.CommandText = $"DELETE FROM {table} WHERE profile_path = $p AND folder_file = $f";
+            del.Parameters.AddWithValue("$p", profilePath);
+            del.Parameters.AddWithValue("$f", folderFile);
+            del.ExecuteNonQuery();
+        }
+
+        transaction.Commit();
+    }
+
     public void SetVisibility(string profilePath, string folderFile, bool visible)
     {
         using var cmd = _connection.CreateCommand();

@@ -4,8 +4,10 @@ namespace LEC.DbxFormat;
 /// One message's worth of data to write into a rebuilt message-store .dbx.
 /// MessageSize is not a field here -- the writer always computes it as
 /// RawBytes.Length, so it can never drift from the bytes actually written.
-/// ReceiveTimeUtc is not carried either: DbxMessageInfo.Read already resolves
-/// Date = SendTimeUtc ?? ReceiveTimeUtc, so one value is enough to round-trip it.
+/// The receiver fields are optional and trail the required ones: a brand-new message
+/// being added has no receiver info at the layer that constructs it, but a message
+/// merely being re-written as part of rebuilding its folder does, and dropping it
+/// would silently lose data from every message already in that folder.
 /// </summary>
 public sealed record DbxMessageWriteEntry(
     byte[] RawBytes,
@@ -14,7 +16,10 @@ public sealed record DbxMessageWriteEntry(
     string? SenderAddress,
     string? MessageId,
     DateTime? SendTimeUtc,
-    int Flags = 0);
+    int Flags = 0,
+    string? ReceiverName = null,
+    string? ReceiverAddress = null,
+    DateTime? ReceiveTimeUtc = null);
 
 /// <summary>
 /// Writes a brand-new, empty message-store .dbx file — the backing file for a folder
@@ -42,6 +47,20 @@ public static class DbxEmailFileWriter
         File.WriteAllBytes(path, bytes);
     }
 
+    /// <summary>
+    /// Rewrites <paramref name="path"/> from scratch so it contains exactly
+    /// <paramref name="messages"/>, via a temp file plus an atomic move.
+    /// </summary>
+    /// <remarks>
+    /// Known limitation — this materializes the entire destination file in memory rather than
+    /// streaming: every message's raw bytes are already in hand, they are accumulated into a
+    /// List&lt;byte&gt;, and that list is then copied to an array for the write, so peak usage
+    /// is roughly 2-3x the final file size (higher still while the list grows and reallocates).
+    /// Since every add rebuilds the whole folder, adding one message to a very large folder —
+    /// hundreds of MB, a size this codebase's real profiles have been observed to reach — is
+    /// both slow and memory-heavy. Converting this to a streaming writer is a separate,
+    /// larger optimization, deliberately not done here.
+    /// </remarks>
     public static void Rebuild(string path, IReadOnlyList<DbxMessageWriteEntry> messages)
     {
         if (messages.Count > byte.MaxValue)
@@ -73,8 +92,19 @@ public static class DbxEmailFileWriter
         WriteInt32(bytes, DbxFormat.HeaderIndexPointerOffset, rootOffset);
 
         string tempPath = path + ".tmp-" + Guid.NewGuid().ToString("N");
-        File.WriteAllBytes(tempPath, bytes.ToArray());
-        File.Move(tempPath, path, overwrite: true);
+        try
+        {
+            File.WriteAllBytes(tempPath, bytes.ToArray());
+            File.Move(tempPath, path, overwrite: true);
+        }
+        catch
+        {
+            // The temp file is named with a fresh GUID, so a leftover is never reused or
+            // cleaned up by any later call -- it would sit next to the real .dbx forever.
+            // File.Move failing (destination still open elsewhere) is the realistic case.
+            try { File.Delete(tempPath); } catch { /* best-effort cleanup */ }
+            throw;
+        }
     }
 
     // Splits rawBytes into DbxFormat.MessageBlockMaxDataSize-byte blocks, writes each with
@@ -130,6 +160,10 @@ public static class DbxEmailFileWriter
             attrs.Add(((byte)DbxEmailFieldId.SenderName, false, 0, EncodeString(message.SenderName)));
         if (message.SenderAddress is not null)
             attrs.Add(((byte)DbxEmailFieldId.SenderAddress, false, 0, EncodeString(message.SenderAddress)));
+        if (message.ReceiverName is not null)
+            attrs.Add(((byte)DbxEmailFieldId.ReceiverName, false, 0, EncodeString(message.ReceiverName)));
+        if (message.ReceiverAddress is not null)
+            attrs.Add(((byte)DbxEmailFieldId.ReceiverAddress, false, 0, EncodeString(message.ReceiverAddress)));
         if (message.MessageId is not null)
             attrs.Add(((byte)DbxEmailFieldId.MessageId, false, 0, EncodeString(message.MessageId)));
         if (message.SendTimeUtc is { } sendTime)
@@ -139,6 +173,11 @@ public static class DbxEmailFileWriter
             // regardless of value -- same reasoning DbxFolderFileWriter already applies to
             // ParentId, just for a wider field.
             attrs.Add(((byte)DbxEmailFieldId.SendCreateTime, false, 0, BitConverter.GetBytes(sendTime.ToFileTimeUtc())));
+        }
+        if (message.ReceiveTimeUtc is { } receiveTime)
+        {
+            // Pointer-form for the same reason as SendCreateTime above: an 8-byte FILETIME.
+            attrs.Add(((byte)DbxEmailFieldId.ReceiveCreateTime, false, 0, BitConverter.GetBytes(receiveTime.ToFileTimeUtc())));
         }
         attrs.Add(DirectOrPointer(DbxEmailFieldId.MessageSize, (uint)message.RawBytes.Length));
         attrs.Add(DirectOrPointer(DbxEmailFieldId.Flags, message.Flags));

@@ -81,6 +81,38 @@ public class ScavengeCacheTests
     }
 
     [Fact]
+    public void ClearScanRemovesTheScanAndItsItemsForThatFolderOnly()
+    {
+        using var cache = new ScavengeCache(TempDbPath());
+
+        cache.SaveScan(@"C:\p", "alvo.dbx", new[]
+        {
+            new CachedRecoveredItem(500, 120, RecoveredMessageKind.Recovered, "A", null, null, null),
+            new CachedRecoveredItem(900, 40, RecoveredMessageKind.Fragment, null, null, null, null),
+        });
+        cache.SaveScan(@"C:\p", "outra.dbx", new[] { new CachedRecoveredItem(1, 1, RecoveredMessageKind.Recovered, "B", null, null, null) });
+
+        cache.ClearScan(@"C:\p", "alvo.dbx");
+
+        Assert.Null(cache.GetScan(@"C:\p", "alvo.dbx"));
+        // Re-saving must start from a clean slate, proving the recovered_item rows went too.
+        cache.SaveScan(@"C:\p", "alvo.dbx", Array.Empty<CachedRecoveredItem>());
+        Assert.Empty(cache.GetScan(@"C:\p", "alvo.dbx")!.Items);
+
+        Assert.Equal("B", Assert.Single(cache.GetScan(@"C:\p", "outra.dbx")!.Items).Subject);
+    }
+
+    [Fact]
+    public void ClearScanOnAFolderThatWasNeverScannedIsANoOp()
+    {
+        using var cache = new ScavengeCache(TempDbPath());
+
+        cache.ClearScan(@"C:\p", "nunca-varrida.dbx"); // must not throw
+
+        Assert.Null(cache.GetScan(@"C:\p", "nunca-varrida.dbx"));
+    }
+
+    [Fact]
     public void DifferentProfilesWithTheSameFolderFileNameDoNotCollide()
     {
         string dbPath = TempDbPath();

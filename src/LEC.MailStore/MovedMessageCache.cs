@@ -70,5 +70,21 @@ public sealed class MovedMessageCache : IDisposable
         cmd.ExecuteNonQuery();
     }
 
+    /// <summary>
+    /// Drops every hidden-message row for one folder. Called after that folder's .dbx is
+    /// rebuilt from scratch (see <see cref="DbxStore.AddMessageAsync"/>): a rebuild renumbers
+    /// every info-node offset in the file, so rows keyed on the old offsets no longer identify
+    /// the messages they were recorded for — keeping them would silently hide whatever
+    /// unrelated message happens to land on a matching offset in the new layout.
+    /// </summary>
+    public void ClearFolder(string profilePath, string folderFile)
+    {
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = "DELETE FROM moved_message WHERE profile_path = $p AND folder_file = $f";
+        cmd.Parameters.AddWithValue("$p", profilePath);
+        cmd.Parameters.AddWithValue("$f", folderFile);
+        cmd.ExecuteNonQuery();
+    }
+
     public void Dispose() => _connection.Dispose();
 }

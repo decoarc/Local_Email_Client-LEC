@@ -78,6 +78,60 @@ public class DbxEmailFileWriterTests
     }
 
     [Fact]
+    public void RebuildRoundTripsTheReceiverFields()
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"lec-messages-{Guid.NewGuid():N}.dbx");
+        try
+        {
+            var receiveTime = new DateTime(2004, 3, 2, 8, 30, 0, DateTimeKind.Utc);
+            var entry = new DbxMessageWriteEntry(Encoding.UTF8.GetBytes("corpo"), "Oi", "Ana", "ana@x.com",
+                "<msg-1@x.com>", new DateTime(2004, 3, 1, 10, 0, 0, DateTimeKind.Utc), Flags: 0,
+                ReceiverName: "Bruno", ReceiverAddress: "bruno@y.com", ReceiveTimeUtc: receiveTime);
+
+            DbxEmailFileWriter.Rebuild(path, new[] { entry });
+
+            using var file = DbxEmailFile.Open(path);
+            var info = Assert.Single(file.Messages);
+
+            Assert.Equal("Bruno", info.ReceiverName);
+            Assert.Equal("bruno@y.com", info.ReceiverAddress);
+            Assert.Equal(receiveTime, info.ReceiveTimeUtc);
+            // ... without disturbing the sender side.
+            Assert.Equal("Ana", info.SenderName);
+            Assert.Equal(new DateTime(2004, 3, 1, 10, 0, 0, DateTimeKind.Utc), info.SendTimeUtc);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void RebuildOmitsTheReceiverFieldsWhenTheyAreNull()
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"lec-messages-{Guid.NewGuid():N}.dbx");
+        try
+        {
+            DbxEmailFileWriter.Rebuild(path, new[]
+            {
+                new DbxMessageWriteEntry(Encoding.UTF8.GetBytes("corpo"), "Oi", null, null, null, null),
+            });
+
+            using var file = DbxEmailFile.Open(path);
+            var info = Assert.Single(file.Messages);
+
+            Assert.Equal(StoreHealth.Ok, file.Health);
+            Assert.Null(info.ReceiverName);
+            Assert.Null(info.ReceiverAddress);
+            Assert.Null(info.ReceiveTimeUtc);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void RebuildSplitsALargeMessageAcrossMultipleBlocksAndReadsItBackWhole()
     {
         string path = Path.Combine(Path.GetTempPath(), $"lec-messages-{Guid.NewGuid():N}.dbx");
@@ -167,6 +221,36 @@ public class DbxEmailFileWriterTests
             using var file = DbxEmailFile.Open(path);
             Assert.Equal(2, file.Messages.Count);
             Assert.Single(Directory.GetFiles(dir)); // only Messages.dbx — no leftover .tmp-* file
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void RebuildLeavesNoTempFileBehindWhenTheFinalMoveFails()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), $"lec-messages-dir-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        string path = Path.Combine(dir, "Messages.dbx");
+        try
+        {
+            DbxEmailFileWriter.Rebuild(path, new[] { new DbxMessageWriteEntry(Encoding.UTF8.GetBytes("um"), "Um", null, null, null, null) });
+
+            // An exclusive handle on the destination makes Rebuild's final File.Move fail
+            // *after* the temp file was already written — the only window where a stray
+            // ".tmp-*" file can survive.
+            using (var exclusive = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
+                Assert.ThrowsAny<Exception>(() => DbxEmailFileWriter.Rebuild(path, new[]
+                {
+                    new DbxMessageWriteEntry(Encoding.UTF8.GetBytes("um"), "Um", null, null, null, null),
+                    new DbxMessageWriteEntry(Encoding.UTF8.GetBytes("dois"), "Dois", null, null, null, null),
+                }));
+            }
+
+            Assert.Empty(Directory.GetFiles(dir, "*.tmp-*"));
         }
         finally
         {

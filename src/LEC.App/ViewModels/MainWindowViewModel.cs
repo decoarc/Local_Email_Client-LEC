@@ -92,9 +92,34 @@ public partial class MainWindowViewModel : ObservableObject
     /// matters: the source is only hidden after the destination write succeeds, so a
     /// failed add leaves both sides exactly as they were.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Known limitation — truncated sources are copied silently. IMailStore.OpenMessageAsync
+    /// does not surface the "truncated" flag that DbxEmailFile.ReadMessageRaw computes
+    /// internally, so a partially-corrupt source message is copied to the destination exactly
+    /// as read, with no warning, and the (still-intact) original is then hidden. Detecting
+    /// this would mean changing OpenMessageAsync's contract for every caller, so it is
+    /// deliberately left for a later slice.
+    /// </para>
+    /// <para>
+    /// Known limitation — message flags are not preserved. MessageHeader does not expose
+    /// Flags, so the moved copy is always written with default flags: read/unread and any
+    /// other flag state is lost across a move.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when the destination is the message's own folder in the same profile.
+    /// </exception>
     public async Task MoveMessageAsync(ProfileViewModel sourceProfile, MessageHeader message,
         ProfileViewModel destinationProfile, int destinationFolderId, CancellationToken ct = default)
     {
+        // Rejected before any I/O: a self-move would rebuild the folder with a duplicate of
+        // the message and then hide the original at an offset that same rebuild invalidated.
+        // Reference equality is the right identity test here -- ProfileViewModel instances are
+        // stable for as long as a profile stays open.
+        if (ReferenceEquals(sourceProfile, destinationProfile) && message.Id.FolderId == destinationFolderId)
+            throw new InvalidOperationException("Não é possível mover uma mensagem para a mesma pasta.");
+
         using var stream = await sourceProfile.Store.OpenMessageAsync(message.Id, ct);
         using var ms = new MemoryStream();
         await stream.CopyToAsync(ms, ct);

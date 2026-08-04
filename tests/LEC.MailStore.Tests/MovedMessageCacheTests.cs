@@ -45,6 +45,33 @@ public class MovedMessageCacheTests
     }
 
     [Fact]
+    public void ClearFolderRemovesEveryOffsetForThatFolderOnly()
+    {
+        using var cache = new MovedMessageCache(TempDbPath());
+
+        cache.MarkMoved(@"C:\p", "alvo.dbx", 100);
+        cache.MarkMoved(@"C:\p", "alvo.dbx", 200);
+        cache.MarkMoved(@"C:\p", "outra.dbx", 300);
+        cache.MarkMoved(@"C:\outroPerfil", "alvo.dbx", 400);
+
+        cache.ClearFolder(@"C:\p", "alvo.dbx");
+
+        Assert.Empty(cache.GetMovedOffsets(@"C:\p", "alvo.dbx"));
+        Assert.Equal(new[] { 300 }, cache.GetMovedOffsets(@"C:\p", "outra.dbx"));
+        Assert.Equal(new[] { 400 }, cache.GetMovedOffsets(@"C:\outroPerfil", "alvo.dbx"));
+    }
+
+    [Fact]
+    public void ClearFolderOnAFolderThatWasNeverMarkedIsANoOp()
+    {
+        using var cache = new MovedMessageCache(TempDbPath());
+
+        cache.ClearFolder(@"C:\p", "nunca-tocada.dbx"); // must not throw
+
+        Assert.Empty(cache.GetMovedOffsets(@"C:\p", "nunca-tocada.dbx"));
+    }
+
+    [Fact]
     public void DifferentProfilesWithTheSameFolderFileNameDoNotCollide()
     {
         using var cache = new MovedMessageCache(TempDbPath());
