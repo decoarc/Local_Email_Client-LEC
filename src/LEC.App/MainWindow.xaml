@@ -106,6 +106,19 @@
                         <ListView.ItemContainerStyle>
                             <Style TargetType="ListViewItem">
                                 <Setter Property="Foreground" Value="{Binding RecoveredKind, Converter={StaticResource RecoveredKindToRowBrushConverter}}"/>
+                                <Setter Property="ContextMenu">
+                                    <Setter.Value>
+                                        <ContextMenu>
+                                            <MenuItem Header="Mover para...">
+                                                <MenuItem.Style>
+                                                    <Style TargetType="MenuItem">
+                                                        <EventSetter Event="Click" Handler="MoveMessage_Click"/>
+                                                    </Style>
+                                                </MenuItem.Style>
+                                            </MenuItem>
+                                        </ContextMenu>
+                                    </Setter.Value>
+                                </Setter>
                             </Style>
                         </ListView.ItemContainerStyle>
                         <ListView.View>

@@ -473,6 +473,37 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void MoveMessage_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as MenuItem)?.DataContext is not MessageHeader header)
+            return;
+        if (_selectedProfile is not { } sourceProfile)
+            return;
+
+        var dialog = new MoveMessageDialog(_viewModel.OpenProfiles, sourceProfile, header.Id.FolderId) { Owner = this };
+        if (dialog.ShowDialog() != true || dialog.SelectedProfile is not { } destinationProfile || dialog.SelectedFolderId is not { } destinationFolderId)
+            return;
+
+        try
+        {
+            await _viewModel.MoveMessageAsync(sourceProfile, header, destinationProfile, destinationFolderId);
+
+            // The moved message is now hidden from the folder currently on screen (its
+            // source) -- reload that folder's list so it disappears, and clear the reading
+            // pane in case it was showing the message that just moved (same visual reset
+            // CloseProfile_Click already uses for "nothing selected").
+            if (_selectedProfile is { } profile && _selectedNode is { } node)
+                await _viewModel.SelectFolderAsync(profile, node);
+
+            NavigateToRenderedMessage(string.Empty);
+            ImagesBlockedBar.Visibility = Visibility.Collapsed;
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "LEC — Não foi possível mover a mensagem", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
     private void NavigateToRenderedMessage(string html)
     {
         // Second, independent cap in front of NavigateToString -- see MaxNavigateHtmlChars.

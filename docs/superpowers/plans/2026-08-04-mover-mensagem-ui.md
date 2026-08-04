@@ -557,7 +557,13 @@ with:
                                 <Setter Property="ContextMenu">
                                     <Setter.Value>
                                         <ContextMenu>
-                                            <MenuItem Header="Mover para..." Click="MoveMessage_Click"/>
+                                            <MenuItem Header="Mover para...">
+                                                <MenuItem.Style>
+                                                    <Style TargetType="MenuItem">
+                                                        <EventSetter Event="Click" Handler="MoveMessage_Click"/>
+                                                    </Style>
+                                                </MenuItem.Style>
+                                            </MenuItem>
                                         </ContextMenu>
                                     </Setter.Value>
                                 </Setter>
@@ -566,6 +572,8 @@ with:
 ```
 
 (A `ContextMenu`'s `DataContext` inherits from its `PlacementTarget` — here, the `ListViewItem` being right-clicked — the same WPF behavior the existing "Nova subpasta aqui..." menu on each folder tree node already relies on. So `MenuItem.DataContext` inside this menu resolves to that row's bound `MessageHeader`.)
+
+**Correction found during implementation:** an inline `Click="MoveMessage_Click"` attribute directly on a `MenuItem` that is itself declared inside a `Style.Setter.Value` does not get compiled event-wiring — WPF's XAML compiler only connects named events for elements it processes as part of the page's static content, not elements defined inside a `Style` that gets instantiated dynamically per item. The fix above wraps the handler in a nested `Style`/`EventSetter` instead, which IS evaluated at the point the style is applied and works correctly regardless of nesting depth. This is the standard, well-established WPF workaround for this exact situation — verified by a clean `dotnet build` and full `dotnet test` pass.
 
 - [ ] **Step 2: Add the click handler**
 
