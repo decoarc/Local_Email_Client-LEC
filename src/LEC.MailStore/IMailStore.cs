@@ -59,4 +59,12 @@ public interface IMailStore : IDisposable
     /// </summary>
     Task AddMessageAsync(int folderId, byte[] rawMessage, string? subject, string? senderName,
         string? senderAddress, string? messageId, DateTime? dateUtc, CancellationToken ct = default);
+
+    /// <summary>
+    /// Marks a message as moved away from its folder — EnumerateHeadersAsync stops
+    /// returning it from now on. Never writes to the backing .dbx; this is purely a
+    /// local, app-side "hide" marker (see MovedMessageCache). A no-op, not an error, if
+    /// called twice for the same message.
+    /// </summary>
+    Task HideMovedMessageAsync(MessageRef id, CancellationToken ct = default);
 }

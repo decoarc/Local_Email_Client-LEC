@@ -21,13 +21,17 @@ public sealed class DbxStore : IMailStore
     public IReadOnlyList<StoreFolder> Folders => _folders;
     public StoreHealth Health { get; }
 
-    private DbxStore(string profileDirectory, List<StoreFolder> folders, Dictionary<int, string?> backingFileNames, StoreHealth health, ScavengeCache scavengeCache)
+    private readonly MovedMessageCache _movedMessageCache;
+    private readonly Dictionary<int, HashSet<int>> _hiddenOffsetsByFolder = new();
+
+    private DbxStore(string profileDirectory, List<StoreFolder> folders, Dictionary<int, string?> backingFileNames, StoreHealth health, ScavengeCache scavengeCache, MovedMessageCache movedMessageCache)
     {
         _profileDirectory = profileDirectory;
         _folders = folders;
         _backingFileNames = backingFileNames;
         Health = health;
         _scavengeCache = scavengeCache;
+        _movedMessageCache = movedMessageCache;
     }
 
     private static readonly char[] InvalidFileNameChars = { '\\', '/', ':', '*', '?', '"', '<', '>', '|' };
@@ -204,7 +208,7 @@ public sealed class DbxStore : IMailStore
         }, ct);
     }
 
-    public static DbxStore Open(string profileDirectoryPath, string? scavengeCacheDatabasePath = null)
+    public static DbxStore Open(string profileDirectoryPath, string? scavengeCacheDatabasePath = null, string? movedMessageCacheDatabasePath = null)
     {
         string foldersDbxPath = Path.Combine(profileDirectoryPath, "Folders.dbx");
         using var folderFile = DbxFolderFile.Open(foldersDbxPath);
@@ -234,7 +238,8 @@ public sealed class DbxStore : IMailStore
 
         var health = folderFile.Health; // read before the `using` disposes folderFile below
         var scavengeCache = OpenScavengeCacheWithFallback(scavengeCacheDatabasePath ?? ScavengeCache.DefaultDatabasePath);
-        return new DbxStore(profileDirectoryPath, folders, backingFileNames, health, scavengeCache);
+        var movedMessageCache = OpenMovedMessageCacheWithFallback(movedMessageCacheDatabasePath ?? MovedMessageCache.DefaultDatabasePath);
+        return new DbxStore(profileDirectoryPath, folders, backingFileNames, health, scavengeCache, movedMessageCache);
     }
 
     // Global Constraint (design §8): cache unavailable (AppData not writable, disk full,
@@ -254,6 +259,19 @@ public sealed class DbxStore : IMailStore
             // "Data Source={path}" -- ":memory:" is itself a complete, valid connection
             // string value for SQLite's in-memory mode, so pass it bare, not pre-wrapped.
             return new ScavengeCache(":memory:");
+        }
+    }
+
+    // Same fallback reasoning as OpenScavengeCacheWithFallback, for the moved-message cache.
+    private static MovedMessageCache OpenMovedMessageCacheWithFallback(string databasePath)
+    {
+        try
+        {
+            return new MovedMessageCache(databasePath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SqliteException)
+        {
+            return new MovedMessageCache(":memory:");
         }
     }
 
@@ -279,9 +297,15 @@ public sealed class DbxStore : IMailStore
             _messagesByFolder[folder.Id] = infoByRef;
         }
 
+        EnsureMovedLoaded(folder);
+        var hiddenOffsets = _hiddenOffsetsByFolder[folder.Id];
+
         foreach (var info in emailFile.Messages)
         {
             ct.ThrowIfCancellationRequested();
+            if (hiddenOffsets.Contains(info.IndexNodeOffset))
+                continue;
+
             var reference = new MessageRef(folder.Id, info.IndexNodeOffset);
             infoByRef[reference] = info;
 
@@ -414,6 +438,38 @@ public sealed class DbxStore : IMailStore
         _scavengeStatusByFolder[folder.Id] = new ScavengeStatus(ScavengeState.Scanned, cached.Items.Count, cached.IsVisible);
     }
 
+    private void EnsureMovedLoaded(StoreFolder folder)
+    {
+        if (_hiddenOffsetsByFolder.ContainsKey(folder.Id))
+            return;
+
+        if (!_backingFileNames.TryGetValue(folder.Id, out var fileName) || fileName is null)
+        {
+            _hiddenOffsetsByFolder[folder.Id] = new HashSet<int>();
+            return;
+        }
+
+        _hiddenOffsetsByFolder[folder.Id] = _movedMessageCache.GetMovedOffsets(_profileDirectory, fileName);
+    }
+
+    public Task HideMovedMessageAsync(MessageRef id, CancellationToken ct = default)
+    {
+        return Task.Run(() =>
+        {
+            if (!_backingFileNames.TryGetValue(id.FolderId, out var fileName) || fileName is null)
+                return;
+
+            _movedMessageCache.MarkMoved(_profileDirectory, fileName, id.IndexNodeOffset);
+
+            if (!_hiddenOffsetsByFolder.TryGetValue(id.FolderId, out var offsets))
+            {
+                offsets = new HashSet<int>();
+                _hiddenOffsetsByFolder[id.FolderId] = offsets;
+            }
+            offsets.Add(id.IndexNodeOffset);
+        }, ct);
+    }
+
     private DbxEmailFile? TryOpenFolderFile(string fileName)
     {
         string path = Path.Combine(_profileDirectory, fileName);
@@ -455,5 +511,6 @@ public sealed class DbxStore : IMailStore
             file.Dispose();
         _openFolders.Clear();
         _scavengeCache.Dispose();
+        _movedMessageCache.Dispose();
     }
 }

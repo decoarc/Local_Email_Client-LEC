@@ -278,4 +278,77 @@ public class DbxStoreTests
         Assert.Equal("Caixa de entrada", inbox.Name);
         Assert.True(inbox.IsLoadable);
     }
+
+    [Fact]
+    public async Task HideMovedMessageAsyncRemovesTheMessageFromEnumerateHeadersAsyncAndPersistsAcrossReopen()
+    {
+        var localFolders = new TestDbxBuilder();
+        localFolders.WriteHeader(DbxFileType.Folder);
+        int inboxNode = localFolders.WriteInfoNode(new[]
+        {
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxFolderFieldId.FolderId, Direct = true, DirectValue = 1 },
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxFolderFieldId.Name, Data = "Caixa de entrada\0"u8.ToArray() },
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxFolderFieldId.FileName, Data = "Inbox.dbx\0"u8.ToArray() },
+        });
+        int root = localFolders.WriteIndexNode(nextTable: 0, ptrCount: 1, indexCount: 0,
+            entries: new[] { (indexPtr: inboxNode, entryNextTable: 0, entryIndexCount: 0) });
+        localFolders.SetInt32At(LEC.DbxFormat.DbxFormat.HeaderItemCountOffset, 1);
+        localFolders.SetInt32At(LEC.DbxFormat.DbxFormat.HeaderIndexPointerOffset, root);
+
+        using var profile = new TestProfileBuilder();
+        profile.WriteFoldersDbx(localFolders.ToArray());
+
+        var inboxMessages = new TestDbxBuilder();
+        inboxMessages.WriteHeader(DbxFileType.Email);
+        int block = inboxMessages.WriteMessageBlock("conteudo"u8.ToArray(), nextOffset: 0);
+        int msgNode = inboxMessages.WriteInfoNode(new[]
+        {
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxEmailFieldId.MessageBlockOffset, Direct = true, DirectValue = (uint)block },
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxEmailFieldId.Subject, Data = "Assunto\0"u8.ToArray() },
+        });
+        int msgRoot = inboxMessages.WriteIndexNode(nextTable: 0, ptrCount: 1, indexCount: 0,
+            entries: new[] { (indexPtr: msgNode, entryNextTable: 0, entryIndexCount: 0) });
+        inboxMessages.SetInt32At(LEC.DbxFormat.DbxFormat.HeaderItemCountOffset, 1);
+        inboxMessages.SetInt32At(LEC.DbxFormat.DbxFormat.HeaderIndexPointerOffset, msgRoot);
+        profile.WriteEmailDbx("Inbox.dbx", inboxMessages.ToArray());
+
+        string movedCacheDbPath = Path.Combine(Path.GetTempPath(), $"lec-moved-{Guid.NewGuid():N}.db");
+        try
+        {
+            StoreFolder folder;
+            using (var store = DbxStore.Open(profile.ProfileDirectory, movedMessageCacheDatabasePath: movedCacheDbPath))
+            {
+                folder = store.Folders.Single();
+
+                var headersBefore = await CollectAsync(store.EnumerateHeadersAsync(folder));
+                var header = Assert.Single(headersBefore);
+
+                await store.HideMovedMessageAsync(header.Id);
+
+                var headersAfterSameSession = await CollectAsync(store.EnumerateHeadersAsync(folder));
+                Assert.Empty(headersAfterSameSession);
+            }
+
+            using var reopened = DbxStore.Open(profile.ProfileDirectory, movedMessageCacheDatabasePath: movedCacheDbPath);
+            var headersAfterReopen = await CollectAsync(reopened.EnumerateHeadersAsync(folder));
+            Assert.Empty(headersAfterReopen);
+        }
+        finally
+        {
+            // Microsoft.Data.Sqlite keeps pooled native connections open past Dispose() for
+            // fast reopen with the same connection string -- that pooled handle still holds
+            // an OS-level lock on the file, so it must be cleared before deleting the temp
+            // db, or File.Delete intermittently throws IOException ("used by another process").
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            File.Delete(movedCacheDbPath);
+        }
+    }
+
+    private static async Task<List<MessageHeader>> CollectAsync(IAsyncEnumerable<MessageHeader> source)
+    {
+        var list = new List<MessageHeader>();
+        await foreach (var item in source)
+            list.Add(item);
+        return list;
+    }
 }
