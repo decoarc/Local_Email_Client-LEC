@@ -85,4 +85,23 @@ public partial class MainWindowViewModel : ObservableObject
     {
         CurrentFolderScavengeStatus = await profile.Store.ScavengeAsync(node.Folder, progress, ct);
     }
+
+    /// <summary>
+    /// Copies a message into another folder (possibly in a different open profile) and
+    /// hides it from its source folder — never deletes or rewrites the source .dbx. Order
+    /// matters: the source is only hidden after the destination write succeeds, so a
+    /// failed add leaves both sides exactly as they were.
+    /// </summary>
+    public async Task MoveMessageAsync(ProfileViewModel sourceProfile, MessageHeader message,
+        ProfileViewModel destinationProfile, int destinationFolderId, CancellationToken ct = default)
+    {
+        using var stream = await sourceProfile.Store.OpenMessageAsync(message.Id, ct);
+        using var ms = new MemoryStream();
+        await stream.CopyToAsync(ms, ct);
+
+        await destinationProfile.Store.AddMessageAsync(destinationFolderId, ms.ToArray(),
+            message.Subject, message.SenderName, message.SenderAddress, message.MessageId, message.Date, ct);
+
+        await sourceProfile.Store.HideMovedMessageAsync(message.Id, ct);
+    }
 }

@@ -79,6 +79,27 @@ internal sealed class FakeMailStore : IMailStore
         return Task.FromResult(created);
     }
 
+    public Exception? ExceptionToThrowOnAddMessage { get; set; }
+    public List<(int FolderId, byte[] RawMessage, string? Subject, string? SenderName, string? SenderAddress, string? MessageId, DateTime? DateUtc)> AddedMessages { get; } = new();
+
+    public Task AddMessageAsync(int folderId, byte[] rawMessage, string? subject, string? senderName,
+        string? senderAddress, string? messageId, DateTime? dateUtc, CancellationToken ct = default)
+    {
+        if (ExceptionToThrowOnAddMessage is { } ex)
+            throw ex;
+
+        AddedMessages.Add((folderId, rawMessage, subject, senderName, senderAddress, messageId, dateUtc));
+        return Task.CompletedTask;
+    }
+
+    public HashSet<MessageRef> HiddenMessageRefs { get; } = new();
+
+    public Task HideMovedMessageAsync(MessageRef id, CancellationToken ct = default)
+    {
+        HiddenMessageRefs.Add(id);
+        return Task.CompletedTask;
+    }
+
     public bool WasDisposed { get; private set; }
 
     public void Dispose() => WasDisposed = true;

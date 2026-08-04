@@ -175,4 +175,79 @@ public class MainWindowViewModelTests
         Assert.Contains(profileA, vm.OpenProfiles);
         Assert.DoesNotContain(profileB, vm.OpenProfiles);
     }
+
+    [Fact]
+    public async Task MoveMessageAsyncCopiesToDestinationAndHidesFromSource()
+    {
+        var sourceFolder = new StoreFolder { Id = 1, Name = "Origem", IsLoadable = true };
+        byte[] raw = "conteudo"u8.ToArray();
+        var messageRef = new MessageRef(sourceFolder.Id, 500);
+        var sourceStore = new FakeMailStore(
+            folders: new[] { sourceFolder },
+            rawByRef: new Dictionary<MessageRef, byte[]> { [messageRef] = raw });
+        var sourceProfile = new ProfileViewModel("Origem", @"C:\perfis\Origem", sourceStore);
+
+        var destFolder = new StoreFolder { Id = 10, Name = "Destino", IsLoadable = true };
+        var destStore = new FakeMailStore(folders: new[] { destFolder });
+        var destProfile = new ProfileViewModel("Destino", @"C:\perfis\Destino", destStore);
+
+        var header = new MessageHeader { Id = messageRef, Subject = "Assunto", SenderName = "Ana", SenderAddress = "ana@x.com", MessageId = "<m1>", Date = new DateTime(2004, 1, 1) };
+        var viewModel = new MainWindowViewModel();
+
+        await viewModel.MoveMessageAsync(sourceProfile, header, destProfile, destFolder.Id);
+
+        var added = Assert.Single(destStore.AddedMessages);
+        Assert.Equal(destFolder.Id, added.FolderId);
+        Assert.Equal(raw, added.RawMessage);
+        Assert.Equal("Assunto", added.Subject);
+        Assert.Equal("Ana", added.SenderName);
+
+        Assert.Contains(messageRef, sourceStore.HiddenMessageRefs);
+    }
+
+    [Fact]
+    public async Task MoveMessageAsyncWorksWhenSourceAndDestinationAreTheSameProfile()
+    {
+        var folderA = new StoreFolder { Id = 1, Name = "A", IsLoadable = true };
+        var folderB = new StoreFolder { Id = 2, Name = "B", IsLoadable = true };
+        var messageRef = new MessageRef(folderA.Id, 500);
+        var store = new FakeMailStore(
+            folders: new[] { folderA, folderB },
+            rawByRef: new Dictionary<MessageRef, byte[]> { [messageRef] = "x"u8.ToArray() });
+        var profile = new ProfileViewModel("P", @"C:\perfis\P", store);
+
+        var header = new MessageHeader { Id = messageRef, Subject = "S" };
+        var viewModel = new MainWindowViewModel();
+
+        await viewModel.MoveMessageAsync(profile, header, profile, folderB.Id);
+
+        Assert.Single(store.AddedMessages);
+        Assert.Contains(messageRef, store.HiddenMessageRefs);
+    }
+
+    [Fact]
+    public async Task MoveMessageAsyncDoesNotHideFromSourceWhenTheDestinationAddFails()
+    {
+        var sourceFolder = new StoreFolder { Id = 1, Name = "Origem", IsLoadable = true };
+        var messageRef = new MessageRef(sourceFolder.Id, 500);
+        var sourceStore = new FakeMailStore(
+            folders: new[] { sourceFolder },
+            rawByRef: new Dictionary<MessageRef, byte[]> { [messageRef] = "x"u8.ToArray() });
+        var sourceProfile = new ProfileViewModel("Origem", @"C:\perfis\Origem", sourceStore);
+
+        var destFolder = new StoreFolder { Id = 10, Name = "Destino", IsLoadable = true };
+        var destStore = new FakeMailStore(folders: new[] { destFolder })
+        {
+            ExceptionToThrowOnAddMessage = new InvalidOperationException("destino cheio"),
+        };
+        var destProfile = new ProfileViewModel("Destino", @"C:\perfis\Destino", destStore);
+
+        var header = new MessageHeader { Id = messageRef, Subject = "S" };
+        var viewModel = new MainWindowViewModel();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => viewModel.MoveMessageAsync(sourceProfile, header, destProfile, destFolder.Id));
+
+        Assert.Empty(sourceStore.HiddenMessageRefs);
+    }
 }
