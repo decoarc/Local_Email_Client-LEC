@@ -74,6 +74,7 @@ internal sealed class FakeMailStore : IMailStore
             ParentId = parentId,
             Name = name,
             IsLoadable = true,
+            HasBackingFile = true,
         };
         _folders.Add(created);
         return Task.FromResult(created);

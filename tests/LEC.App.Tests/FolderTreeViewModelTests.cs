@@ -13,6 +13,7 @@ public class FolderTreeViewModelTests
         ParentId = parentId,
         Name = name,
         IsLoadable = true,
+        HasBackingFile = true,
     };
 
     [Fact]
@@ -96,8 +97,8 @@ public class FolderTreeViewModelTests
     [Fact]
     public void FlagsSpecialFoldersButNotOrdinaryOnes()
     {
-        var inbox = new StoreFolder { Id = 1, Name = "Caixa de entrada", IsLoadable = true, SpecialFolderKind = SpecialFolderKind.Inbox };
-        var ordinary = new StoreFolder { Id = 2, Name = "Enviados 2004", IsLoadable = true };
+        var inbox = new StoreFolder { Id = 1, Name = "Caixa de entrada", IsLoadable = true, HasBackingFile = true, SpecialFolderKind = SpecialFolderKind.Inbox };
+        var ordinary = new StoreFolder { Id = 2, Name = "Enviados 2004", IsLoadable = true, HasBackingFile = true };
 
         var vm = new FolderTreeViewModel();
         vm.Build(new[] { inbox, ordinary });

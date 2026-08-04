@@ -21,4 +21,13 @@ public sealed class StoreFolder
     /// successfully; EnumerateHeadersAsync degrades gracefully either way.
     /// </summary>
     public required bool IsLoadable { get; init; }
+
+    /// <summary>
+    /// True if this folder has a FileName attribute at all — independent of whether that
+    /// file exists on disk (that's IsLoadable) or is healthy (that's DbxStore.GetFolderHealth).
+    /// False for purely organizational placeholder folders (e.g. "Pastas locais"), which
+    /// AddMessageAsync always rejects. Used by LEC.App to gray out invalid move destinations
+    /// before the user can pick one, not just after AddMessageAsync throws.
+    /// </summary>
+    public required bool HasBackingFile { get; init; }
 }

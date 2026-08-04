@@ -51,6 +51,7 @@ public class DbxStoreTests
         Assert.Null(pastasLocais.ParentId); // -1 sentinel maps to null
         Assert.Equal("Pastas locais", pastasLocais.Name);
         Assert.True(pastasLocais.IsLoadable); // no backing file at all — trivially "loadable" (nothing to load)
+        Assert.False(pastasLocais.HasBackingFile); // no FileName attribute — a placeholder folder
 
         var inbox = store.Folders.Single(f => f.Id == 2);
         Assert.Equal(1, inbox.ParentId);
@@ -58,6 +59,7 @@ public class DbxStoreTests
         Assert.Equal(SpecialFolderKind.Inbox, inbox.SpecialFolderKind);
         Assert.Equal(5, inbox.MessageCount);
         Assert.False(inbox.IsLoadable); // Inbox.dbx does not exist on disk
+        Assert.True(inbox.HasBackingFile); // has a FileName attribute, even though the file is missing
     }
 
     [Fact]

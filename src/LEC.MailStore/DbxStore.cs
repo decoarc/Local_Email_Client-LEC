@@ -134,6 +134,7 @@ public sealed class DbxStore : IMailStore
                     SpecialFolderKind = SpecialFolderKind.None,
                     MessageCount = 0,
                     IsLoadable = true,
+                    HasBackingFile = true,
                 };
                 // Not thread-safe: _folders/_backingFileNames are plain collections, not
                 // synchronized. The current UI caller (MainWindow.CreateFolderAsync)
@@ -268,6 +269,7 @@ public sealed class DbxStore : IMailStore
                 SpecialFolderKind = ToSpecialFolderKind(f.SpecialFolderType),
                 MessageCount = f.MessageCount,
                 IsLoadable = isLoadable,
+                HasBackingFile = fileName is not null,
             });
             backingFileNames[f.FolderId] = fileName;
         }

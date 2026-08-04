@@ -11,7 +11,7 @@ public class MessageListViewModelTests
     [Fact]
     public async Task LoadsHeadersFromTheStoreForTheSelectedFolder()
     {
-        var folder = new StoreFolder { Id = 1, Name = "Caixa de entrada", IsLoadable = true };
+        var folder = new StoreFolder { Id = 1, Name = "Caixa de entrada", IsLoadable = true, HasBackingFile = true };
         var header = new MessageHeader { Id = new MessageRef(1, 100), Subject = "Ola" };
         var store = new FakeMailStore(
             folders: new[] { folder },
@@ -28,7 +28,7 @@ public class MessageListViewModelTests
     [Fact]
     public async Task SetsAStatusMessageForANonLoadableFolder()
     {
-        var folder = new StoreFolder { Id = 1, Name = "Quebrada", IsLoadable = false };
+        var folder = new StoreFolder { Id = 1, Name = "Quebrada", IsLoadable = false, HasBackingFile = true };
         var store = new FakeMailStore(folders: new[] { folder });
 
         var vm = new MessageListViewModel(store);
@@ -41,8 +41,8 @@ public class MessageListViewModelTests
     [Fact]
     public async Task ClearsPreviousMessagesWhenLoadingADifferentFolder()
     {
-        var folderA = new StoreFolder { Id = 1, Name = "A", IsLoadable = true };
-        var folderB = new StoreFolder { Id = 2, Name = "B", IsLoadable = true };
+        var folderA = new StoreFolder { Id = 1, Name = "A", IsLoadable = true, HasBackingFile = true };
+        var folderB = new StoreFolder { Id = 2, Name = "B", IsLoadable = true, HasBackingFile = true };
         var store = new FakeMailStore(
             folders: new[] { folderA, folderB },
             headersByFolder: new()
@@ -61,7 +61,7 @@ public class MessageListViewModelTests
     [Fact]
     public async Task SortsMessagesNewestFirstByDate()
     {
-        var folder = new StoreFolder { Id = 1, Name = "Caixa de entrada", IsLoadable = true };
+        var folder = new StoreFolder { Id = 1, Name = "Caixa de entrada", IsLoadable = true, HasBackingFile = true };
         var older = new MessageHeader { Id = new MessageRef(1, 1), Subject = "Antigo", Date = new DateTime(2001, 1, 1) };
         var newer = new MessageHeader { Id = new MessageRef(1, 2), Subject = "Novo", Date = new DateTime(2005, 1, 1) };
         var noDate = new MessageHeader { Id = new MessageRef(1, 3), Subject = "SemData", Date = null };

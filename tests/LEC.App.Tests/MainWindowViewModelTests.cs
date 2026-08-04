@@ -54,7 +54,7 @@ public class MainWindowViewModelTests
     [Fact]
     public async Task SelectFolderAsyncMakesTheProfileActiveAndLoadsItsMessageList()
     {
-        var folder = new StoreFolder { Id = 1, Name = "X", IsLoadable = true };
+        var folder = new StoreFolder { Id = 1, Name = "X", IsLoadable = true, HasBackingFile = true };
         var header = new MessageHeader { Id = new MessageRef(1, 1), Subject = "Ola" };
         var store = new FakeMailStore(
             folders: new[] { folder },
@@ -75,8 +75,8 @@ public class MainWindowViewModelTests
     [Fact]
     public async Task SelectingAnotherFolderInTheSameProfileReusesTheSameMessageListInstance()
     {
-        var folderA = new StoreFolder { Id = 1, Name = "A", IsLoadable = true };
-        var folderB = new StoreFolder { Id = 2, Name = "B", IsLoadable = true };
+        var folderA = new StoreFolder { Id = 1, Name = "A", IsLoadable = true, HasBackingFile = true };
+        var folderB = new StoreFolder { Id = 2, Name = "B", IsLoadable = true, HasBackingFile = true };
         var store = new FakeMailStore(folders: new[] { folderA, folderB });
         var profile = new ProfileViewModel("Perfil", @"C:\perfil", store);
 
@@ -94,8 +94,8 @@ public class MainWindowViewModelTests
     [Fact]
     public async Task SelectingAFolderInADifferentProfileSwitchesTheActiveStoreAndReplacesMessageListAndReader()
     {
-        var folderA = new StoreFolder { Id = 1, Name = "A", IsLoadable = true };
-        var folderB = new StoreFolder { Id = 2, Name = "B", IsLoadable = true };
+        var folderA = new StoreFolder { Id = 1, Name = "A", IsLoadable = true, HasBackingFile = true };
+        var folderB = new StoreFolder { Id = 2, Name = "B", IsLoadable = true, HasBackingFile = true };
         var storeA = new FakeMailStore(folders: new[] { folderA });
         var storeB = new FakeMailStore(folders: new[] { folderB });
         var profileA = new ProfileViewModel("Perfil A", @"C:\a", storeA);
@@ -119,7 +119,7 @@ public class MainWindowViewModelTests
     [Fact]
     public async Task CloseProfileRemovesItFromOpenProfilesAndDisposesItsStore()
     {
-        var folder = new StoreFolder { Id = 1, Name = "X", IsLoadable = true };
+        var folder = new StoreFolder { Id = 1, Name = "X", IsLoadable = true, HasBackingFile = true };
         var store = new FakeMailStore(folders: new[] { folder });
         var profile = new ProfileViewModel("Perfil", @"C:\perfil", store);
 
@@ -136,7 +136,7 @@ public class MainWindowViewModelTests
     [Fact]
     public async Task CloseProfileOnTheActiveProfileClearsMessageListReaderAndScavengeStatus()
     {
-        var folder = new StoreFolder { Id = 1, Name = "X", IsLoadable = true };
+        var folder = new StoreFolder { Id = 1, Name = "X", IsLoadable = true, HasBackingFile = true };
         var store = new FakeMailStore(folders: new[] { folder });
         var profile = new ProfileViewModel("Perfil", @"C:\perfil", store);
 
@@ -155,8 +155,8 @@ public class MainWindowViewModelTests
     [Fact]
     public async Task CloseProfileOnANonActiveProfileLeavesTheActiveProfileUntouched()
     {
-        var folderA = new StoreFolder { Id = 1, Name = "A", IsLoadable = true };
-        var folderB = new StoreFolder { Id = 2, Name = "B", IsLoadable = true };
+        var folderA = new StoreFolder { Id = 1, Name = "A", IsLoadable = true, HasBackingFile = true };
+        var folderB = new StoreFolder { Id = 2, Name = "B", IsLoadable = true, HasBackingFile = true };
         var storeA = new FakeMailStore(folders: new[] { folderA });
         var storeB = new FakeMailStore(folders: new[] { folderB });
         var profileA = new ProfileViewModel("Perfil A", @"C:\a", storeA);
@@ -179,7 +179,7 @@ public class MainWindowViewModelTests
     [Fact]
     public async Task MoveMessageAsyncCopiesToDestinationAndHidesFromSource()
     {
-        var sourceFolder = new StoreFolder { Id = 1, Name = "Origem", IsLoadable = true };
+        var sourceFolder = new StoreFolder { Id = 1, Name = "Origem", IsLoadable = true, HasBackingFile = true };
         byte[] raw = "conteudo"u8.ToArray();
         var messageRef = new MessageRef(sourceFolder.Id, 500);
         var sourceStore = new FakeMailStore(
@@ -187,7 +187,7 @@ public class MainWindowViewModelTests
             rawByRef: new Dictionary<MessageRef, byte[]> { [messageRef] = raw });
         var sourceProfile = new ProfileViewModel("Origem", @"C:\perfis\Origem", sourceStore);
 
-        var destFolder = new StoreFolder { Id = 10, Name = "Destino", IsLoadable = true };
+        var destFolder = new StoreFolder { Id = 10, Name = "Destino", IsLoadable = true, HasBackingFile = true };
         var destStore = new FakeMailStore(folders: new[] { destFolder });
         var destProfile = new ProfileViewModel("Destino", @"C:\perfis\Destino", destStore);
 
@@ -208,8 +208,8 @@ public class MainWindowViewModelTests
     [Fact]
     public async Task MoveMessageAsyncWorksWhenSourceAndDestinationAreTheSameProfile()
     {
-        var folderA = new StoreFolder { Id = 1, Name = "A", IsLoadable = true };
-        var folderB = new StoreFolder { Id = 2, Name = "B", IsLoadable = true };
+        var folderA = new StoreFolder { Id = 1, Name = "A", IsLoadable = true, HasBackingFile = true };
+        var folderB = new StoreFolder { Id = 2, Name = "B", IsLoadable = true, HasBackingFile = true };
         var messageRef = new MessageRef(folderA.Id, 500);
         var store = new FakeMailStore(
             folders: new[] { folderA, folderB },
@@ -228,14 +228,14 @@ public class MainWindowViewModelTests
     [Fact]
     public async Task MoveMessageAsyncDoesNotHideFromSourceWhenTheDestinationAddFails()
     {
-        var sourceFolder = new StoreFolder { Id = 1, Name = "Origem", IsLoadable = true };
+        var sourceFolder = new StoreFolder { Id = 1, Name = "Origem", IsLoadable = true, HasBackingFile = true };
         var messageRef = new MessageRef(sourceFolder.Id, 500);
         var sourceStore = new FakeMailStore(
             folders: new[] { sourceFolder },
             rawByRef: new Dictionary<MessageRef, byte[]> { [messageRef] = "x"u8.ToArray() });
         var sourceProfile = new ProfileViewModel("Origem", @"C:\perfis\Origem", sourceStore);
 
-        var destFolder = new StoreFolder { Id = 10, Name = "Destino", IsLoadable = true };
+        var destFolder = new StoreFolder { Id = 10, Name = "Destino", IsLoadable = true, HasBackingFile = true };
         var destStore = new FakeMailStore(folders: new[] { destFolder })
         {
             ExceptionToThrowOnAddMessage = new InvalidOperationException("destino cheio"),
@@ -254,7 +254,7 @@ public class MainWindowViewModelTests
     [Fact]
     public async Task MoveMessageAsyncIntoTheMessagesOwnFolderThrowsAndTouchesNothing()
     {
-        var folder = new StoreFolder { Id = 1, Name = "A", IsLoadable = true };
+        var folder = new StoreFolder { Id = 1, Name = "A", IsLoadable = true, HasBackingFile = true };
         var messageRef = new MessageRef(folder.Id, 500);
         var store = new FakeMailStore(
             folders: new[] { folder },

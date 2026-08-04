@@ -9,8 +9,8 @@ public class ProfileViewModelTests
     [Fact]
     public void ConstructorBuildsTheFolderTreeFromTheStoresFolders()
     {
-        var root = new StoreFolder { Id = 1, Name = "Raiz", IsLoadable = true };
-        var child = new StoreFolder { Id = 2, ParentId = 1, Name = "Filha", IsLoadable = true };
+        var root = new StoreFolder { Id = 1, Name = "Raiz", IsLoadable = true, HasBackingFile = true };
+        var child = new StoreFolder { Id = 2, ParentId = 1, Name = "Filha", IsLoadable = true, HasBackingFile = true };
         var store = new FakeMailStore(folders: new[] { root, child });
 
         var profile = new ProfileViewModel("BCP", @"C:\perfis\BCP", store);
@@ -26,7 +26,7 @@ public class ProfileViewModelTests
     [Fact]
     public async Task CreateFolderAsyncAddsTheNewFolderToTheTree()
     {
-        var root = new StoreFolder { Id = 1, Name = "Raiz", IsLoadable = true };
+        var root = new StoreFolder { Id = 1, Name = "Raiz", IsLoadable = true, HasBackingFile = true };
         var store = new FakeMailStore(folders: new[] { root });
         var profile = new ProfileViewModel("BCP", @"C:\perfis\BCP", store);
 
@@ -39,7 +39,7 @@ public class ProfileViewModelTests
     [Fact]
     public async Task CreateFolderAsyncAsASubfolderAddsItUnderTheParentNode()
     {
-        var root = new StoreFolder { Id = 1, Name = "Raiz", IsLoadable = true };
+        var root = new StoreFolder { Id = 1, Name = "Raiz", IsLoadable = true, HasBackingFile = true };
         var store = new FakeMailStore(folders: new[] { root });
         var profile = new ProfileViewModel("BCP", @"C:\perfis\BCP", store);
 
@@ -53,7 +53,7 @@ public class ProfileViewModelTests
     [Fact]
     public async Task CreateFolderAsyncPropagatesStoreExceptions()
     {
-        var root = new StoreFolder { Id = 1, Name = "Raiz", IsLoadable = true };
+        var root = new StoreFolder { Id = 1, Name = "Raiz", IsLoadable = true, HasBackingFile = true };
         var store = new FakeMailStore(folders: new[] { root })
         {
             ExceptionToThrowOnCreateFolder = new InvalidOperationException("nome inválido"),
