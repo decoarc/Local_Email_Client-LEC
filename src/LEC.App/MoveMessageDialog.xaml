@@ -1,0 +1,52 @@
+<!-- src/LEC.App/MoveMessageDialog.xaml -->
+<Window x:Class="LEC.App.MoveMessageDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:conv="clr-namespace:LEC.App.Converters"
+        Title="Mover mensagem" Width="420" Height="480"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False">
+    <Window.Resources>
+        <conv:MoveDestinationValidityConverter x:Key="ValidityConverter"/>
+    </Window.Resources>
+    <DockPanel Margin="12">
+        <TextBlock DockPanel.Dock="Top" Text="Escolha a pasta de destino:" Margin="0,0,0,8"/>
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button Content="Cancelar" IsCancel="True" Width="80" Margin="0,0,8,0"/>
+            <Button x:Name="MoveButton" Content="Mover" IsDefault="True" Width="80" IsEnabled="False" Click="MoveButton_Click"/>
+        </StackPanel>
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <ItemsControl x:Name="ProfilesItemsControl">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <StackPanel Margin="0,0,0,8">
+                            <TextBlock Text="{Binding DisplayName}" FontWeight="Bold" Margin="0,0,0,2"/>
+                            <TreeView ItemsSource="{Binding FolderTree.RootNodes}"
+                                      SelectedItemChanged="TreeView_SelectedItemChanged"
+                                      BorderThickness="0"
+                                      ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                                      ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                <TreeView.ItemContainerStyle>
+                                    <Style TargetType="TreeViewItem">
+                                        <Setter Property="IsEnabled">
+                                            <Setter.Value>
+                                                <MultiBinding Converter="{StaticResource ValidityConverter}">
+                                                    <Binding Path="Folder"/>
+                                                    <Binding Path="DataContext" RelativeSource="{RelativeSource AncestorType=TreeView}"/>
+                                                </MultiBinding>
+                                            </Setter.Value>
+                                        </Setter>
+                                    </Style>
+                                </TreeView.ItemContainerStyle>
+                                <TreeView.ItemTemplate>
+                                    <HierarchicalDataTemplate ItemsSource="{Binding Children}">
+                                        <TextBlock Text="{Binding DisplayName}"/>
+                                    </HierarchicalDataTemplate>
+                                </TreeView.ItemTemplate>
+                            </TreeView>
+                        </StackPanel>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+    </DockPanel>
+</Window>
