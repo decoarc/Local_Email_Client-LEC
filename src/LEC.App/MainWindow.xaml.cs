@@ -480,12 +480,12 @@ public partial class MainWindow : Window
         if (_selectedProfile is not { } sourceProfile)
             return;
 
-        var dialog = new MoveMessageDialog(_viewModel.OpenProfiles, sourceProfile, header.Id.FolderId) { Owner = this };
-        if (dialog.ShowDialog() != true || dialog.SelectedProfile is not { } destinationProfile || dialog.SelectedFolderId is not { } destinationFolderId)
-            return;
-
         try
         {
+            var dialog = new MoveMessageDialog(_viewModel.OpenProfiles, sourceProfile, header.Id.FolderId) { Owner = this };
+            if (dialog.ShowDialog() != true || dialog.SelectedProfile is not { } destinationProfile || dialog.SelectedFolderId is not { } destinationFolderId)
+                return;
+
             await _viewModel.MoveMessageAsync(sourceProfile, header, destinationProfile, destinationFolderId);
 
             // The moved message is now hidden from the folder currently on screen (its
