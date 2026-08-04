@@ -154,6 +154,56 @@ public sealed class DbxStore : IMailStore
         }, ct);
     }
 
+    /// <summary>
+    /// Appends a message to a folder — a from-scratch rewrite of that folder's backing
+    /// .dbx (see DbxEmailFileWriter.Rebuild), same "flat tree, ≤255 items" approach as
+    /// CreateFolderAsync/Folders.dbx.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when: <paramref name="folderId"/> does not match any existing folder; that
+    /// folder has no backing file; or the backing .dbx is damaged (<c>Health != StoreHealth.Ok</c>),
+    /// since rebuilding it in that state would silently discard whatever messages this
+    /// reader couldn't parse. If the folder already has 255 messages, the underlying
+    /// <see cref="DbxEmailFileWriter.Rebuild"/> throws <see cref="ArgumentException"/> instead
+    /// — not caught or rewrapped here.
+    /// </exception>
+    public Task AddMessageAsync(int folderId, byte[] rawMessage, string? subject, string? senderName,
+        string? senderAddress, string? messageId, DateTime? dateUtc, CancellationToken ct = default)
+    {
+        return Task.Run(() =>
+        {
+            if (!_folders.Any(f => f.Id == folderId))
+                throw new InvalidOperationException($"Pasta {folderId} não encontrada.");
+
+            if (!_backingFileNames.TryGetValue(folderId, out var fileName) || fileName is null)
+                throw new InvalidOperationException($"Pasta {folderId} não tem arquivo de apoio.");
+
+            string filePath = Path.Combine(_profileDirectory, fileName);
+
+            List<DbxMessageWriteEntry> entries;
+            using (var current = DbxEmailFile.Open(filePath))
+            {
+                if (current.Health != StoreHealth.Ok)
+                    throw new InvalidOperationException(
+                        $"\"{fileName}\" está danificado; adicionar uma mensagem reescreveria o arquivo e descartaria as mensagens ilegíveis.");
+
+                entries = current.Messages
+                    .Select(info => new DbxMessageWriteEntry(
+                        current.ReadMessageRaw(info, out _), info.Subject, info.SenderName, info.SenderAddress,
+                        info.MessageId, info.SendTimeUtc ?? info.ReceiveTimeUtc, info.Flags))
+                    .ToList();
+            }
+
+            string pristinePath = filePath + ".original";
+            if (!File.Exists(pristinePath))
+                File.Copy(filePath, pristinePath);
+            File.Copy(filePath, filePath + ".bak", overwrite: true);
+
+            entries.Add(new DbxMessageWriteEntry(rawMessage, subject, senderName, senderAddress, messageId, dateUtc));
+            DbxEmailFileWriter.Rebuild(filePath, entries);
+        }, ct);
+    }
+
     public static DbxStore Open(string profileDirectoryPath, string? scavengeCacheDatabasePath = null)
     {
         string foldersDbxPath = Path.Combine(profileDirectoryPath, "Folders.dbx");

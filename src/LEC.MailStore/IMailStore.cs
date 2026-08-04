@@ -49,4 +49,14 @@ public interface IMailStore : IDisposable
     /// exceptions thrown).
     /// </summary>
     Task<StoreFolder> CreateFolderAsync(string name, int? parentId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Appends a message to a folder in THIS store — a from-scratch rewrite of that
+    /// folder's backing .dbx file. Has no idea where the raw bytes came from; a
+    /// cross-store "move message" orchestration (spanning two IMailStore instances) is
+    /// responsible for reading them from wherever the message currently lives first.
+    /// See DbxStore.AddMessageAsync for the full contract.
+    /// </summary>
+    Task AddMessageAsync(int folderId, byte[] rawMessage, string? subject, string? senderName,
+        string? senderAddress, string? messageId, DateTime? dateUtc, CancellationToken ct = default);
 }
