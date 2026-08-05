@@ -28,4 +28,16 @@ public sealed class ProfileViewModel
         FolderTree.Build(Store.Folders);
         return created;
     }
+
+    public async Task DeleteFolderAsync(int folderId)
+    {
+        await Store.DeleteFolderAsync(folderId);
+        FolderTree.Build(Store.Folders);
+    }
+
+    public async Task MoveFolderAsync(int folderId, int? newParentId)
+    {
+        await Store.MoveFolderAsync(folderId, newParentId);
+        FolderTree.Build(Store.Folders);
+    }
 }
