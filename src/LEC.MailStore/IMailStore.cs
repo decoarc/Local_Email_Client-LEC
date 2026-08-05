@@ -76,4 +76,20 @@ public interface IMailStore : IDisposable
     /// message.
     /// </summary>
     Task DeleteMessageAsync(MessageRef id, CancellationToken ct = default);
+
+    /// <summary>
+    /// Hides a folder — and every folder in its subtree — from Folders. Never writes to
+    /// Folders.dbx or any message .dbx. See DbxStore.DeleteFolderAsync for the full
+    /// contract (special-folder guard, subtree collection, exceptions thrown). Unlike
+    /// DeleteMessageAsync, calling this twice for the same id throws on the second call.
+    /// </summary>
+    Task DeleteFolderAsync(int folderId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Moves a folder to a new parent within this store — a from-scratch rewrite of
+    /// Folders.dbx that changes only the moved folder's ParentId entry. See
+    /// DbxStore.MoveFolderAsync for the full contract (cycle guard, name-collision guard,
+    /// exceptions thrown). Same-store only — no cross-profile move.
+    /// </summary>
+    Task MoveFolderAsync(int folderId, int? newParentId, CancellationToken ct = default);
 }

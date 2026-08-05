@@ -109,6 +109,44 @@ internal sealed class FakeMailStore : IMailStore
         return Task.CompletedTask;
     }
 
+    public Exception? ExceptionToThrowOnDeleteFolder { get; set; }
+    public List<int> DeletedFolderIds { get; } = new();
+
+    public Task DeleteFolderAsync(int folderId, CancellationToken ct = default)
+    {
+        if (ExceptionToThrowOnDeleteFolder is { } ex)
+            throw ex;
+
+        DeletedFolderIds.Add(folderId);
+        _folders.RemoveAll(f => f.Id == folderId);
+        return Task.CompletedTask;
+    }
+
+    public Exception? ExceptionToThrowOnMoveFolder { get; set; }
+    public List<(int FolderId, int? NewParentId)> MovedFolders { get; } = new();
+
+    public Task MoveFolderAsync(int folderId, int? newParentId, CancellationToken ct = default)
+    {
+        if (ExceptionToThrowOnMoveFolder is { } ex)
+            throw ex;
+
+        MovedFolders.Add((folderId, newParentId));
+
+        int index = _folders.FindIndex(f => f.Id == folderId);
+        var current = _folders[index];
+        _folders[index] = new StoreFolder
+        {
+            Id = current.Id,
+            ParentId = newParentId,
+            Name = current.Name,
+            SpecialFolderKind = current.SpecialFolderKind,
+            MessageCount = current.MessageCount,
+            IsLoadable = current.IsLoadable,
+            HasBackingFile = current.HasBackingFile,
+        };
+        return Task.CompletedTask;
+    }
+
     public bool WasDisposed { get; private set; }
 
     public void Dispose() => WasDisposed = true;
