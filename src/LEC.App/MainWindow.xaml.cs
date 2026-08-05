@@ -568,7 +568,7 @@ public partial class MainWindow : Window
     {
         try
         {
-            if (MessageListView.SelectedItem is MessageHeader header)
+            if (MessageListView.SelectedItems.Count == 1 && MessageListView.SelectedItem is MessageHeader header)
             {
                 if (_imageBlocker is not null)
                 {
@@ -580,6 +580,12 @@ public partial class MainWindow : Window
                 if (_viewModel.MessageReader?.Current is { } rendered)
                     NavigateToRenderedMessage(rendered.Html);
             }
+            else
+            {
+                // 0 selected, or a batch selection (2+) -- no single message to show.
+                NavigateToRenderedMessage(string.Empty);
+                ImagesBlockedBar.Visibility = Visibility.Collapsed;
+            }
         }
         catch (Exception ex)
         {
@@ -587,25 +593,42 @@ public partial class MainWindow : Window
         }
     }
 
+    // Resolves which messages a context-menu action or the Delete key should act on: the
+    // current selection if there is one -- even if the row that triggered the menu isn't
+    // part of it, right-clicking off-selection intentionally leaves the existing selection
+    // alone -- or the clicked row itself as a fallback for the very first right-click in a
+    // freshly loaded list, before anything has ever been selected.
+    private List<MessageHeader> ResolveTargetMessages(object sender)
+    {
+        if (MessageListView.SelectedItems.Count > 0)
+            return MessageListView.SelectedItems.Cast<MessageHeader>().ToList();
+
+        if ((sender as MenuItem)?.DataContext is MessageHeader header)
+            return new List<MessageHeader> { header };
+
+        return new List<MessageHeader>();
+    }
+
     private async void MoveMessage_Click(object sender, RoutedEventArgs e)
     {
-        if ((sender as MenuItem)?.DataContext is not MessageHeader header)
+        var messages = ResolveTargetMessages(sender);
+        if (messages.Count == 0)
             return;
         if (_selectedProfile is not { } sourceProfile)
             return;
 
         try
         {
-            var dialog = new MoveMessageDialog(_viewModel.OpenProfiles, sourceProfile, header.Id.FolderId) { Owner = this };
+            var dialog = new MoveMessageDialog(_viewModel.OpenProfiles, sourceProfile, messages[0].Id.FolderId) { Owner = this };
             if (dialog.ShowDialog() != true || dialog.SelectedProfile is not { } destinationProfile || dialog.SelectedFolderId is not { } destinationFolderId)
                 return;
 
-            await _viewModel.MoveMessageAsync(sourceProfile, header, destinationProfile, destinationFolderId);
+            await _viewModel.MoveMessagesAsync(sourceProfile, messages, destinationProfile, destinationFolderId);
 
-            // The moved message is now hidden from the folder currently on screen (its
-            // source) -- reload that folder's list so it disappears, and clear the reading
-            // pane in case it was showing the message that just moved (same visual reset
-            // CloseProfile_Click already uses for "nothing selected").
+            // The moved messages are now hidden from the folder currently on screen (its
+            // source) -- reload that folder's list so they disappear, and clear the reading
+            // pane in case it was showing one of them (same visual reset CloseProfile_Click
+            // already uses for "nothing selected").
             if (_selectedProfile is { } profile && _selectedNode is { } node)
                 await _viewModel.SelectFolderAsync(profile, node);
 
@@ -620,45 +643,49 @@ public partial class MainWindow : Window
 
     private async void DeleteMessage_Click(object sender, RoutedEventArgs e)
     {
-        if ((sender as MenuItem)?.DataContext is not MessageHeader header)
+        var messages = ResolveTargetMessages(sender);
+        if (messages.Count == 0)
             return;
 
-        await ConfirmAndDeleteAsync(header);
+        await ConfirmAndDeleteAsync(messages);
     }
 
     private async void MessageListView_KeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key != Key.Delete)
             return;
-        if (MessageListView.SelectedItem is not MessageHeader header)
+        if (MessageListView.SelectedItems.Count == 0)
             return;
 
         e.Handled = true;
-        await ConfirmAndDeleteAsync(header);
+        await ConfirmAndDeleteAsync(MessageListView.SelectedItems.Cast<MessageHeader>().ToList());
     }
 
-    private async Task ConfirmAndDeleteAsync(MessageHeader header)
+    private async Task ConfirmAndDeleteAsync(List<MessageHeader> messages)
     {
         if (_selectedProfile is not { } sourceProfile)
             return;
 
-        var result = MessageBox.Show(this, "Apagar esta mensagem?", "LEC — Apagar mensagem",
+        string question = messages.Count == 1
+            ? "Apagar esta mensagem?"
+            : $"Apagar estas {messages.Count} mensagens?";
+        var result = MessageBox.Show(this, question, "LEC — Apagar mensagem",
             MessageBoxButton.YesNo, MessageBoxImage.Question);
         if (result != MessageBoxResult.Yes)
             return;
 
         try
         {
-            await _viewModel.DeleteMessageAsync(sourceProfile, header);
+            await _viewModel.DeleteMessagesAsync(sourceProfile, messages);
 
-            // The deleted message is now hidden from the folder currently on screen --
-            // reload that folder's list so it disappears, and clear the reading pane in
-            // case it was showing the message that just got deleted (same visual reset
-            // MoveMessage_Click/CloseProfile_Click already use for "nothing selected").
-            // Re-read both _selectedProfile/_selectedNode together here, exactly as
-            // MoveMessage_Click does, rather than pairing a pre-await profile with a
-            // post-await node -- the user's selection could in principle have moved on
-            // during the confirmation dialog and the delete call.
+            // The deleted messages are now hidden from the folder currently on screen --
+            // reload that folder's list so they disappear, and clear the reading pane in
+            // case it was showing one of them (same visual reset MoveMessage_Click/
+            // CloseProfile_Click already use for "nothing selected"). Re-read both
+            // _selectedProfile/_selectedNode together here, exactly as MoveMessage_Click
+            // does, rather than pairing a pre-await profile with a post-await node -- the
+            // user's selection could in principle have moved on during the confirmation
+            // dialog and the delete call.
             if (_selectedProfile is { } profile && _selectedNode is { } node)
                 await _viewModel.SelectFolderAsync(profile, node);
 

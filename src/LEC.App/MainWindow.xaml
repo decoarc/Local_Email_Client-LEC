@@ -105,6 +105,7 @@
                     </Border>
                     <ListView x:Name="MessageListView"
                               ItemsSource="{Binding MessageList.Messages}"
+                              SelectionMode="Extended"
                               SelectionChanged="MessageListView_SelectionChanged"
                               KeyDown="MessageListView_KeyDown"
                               VirtualizingPanel.IsVirtualizing="True"
