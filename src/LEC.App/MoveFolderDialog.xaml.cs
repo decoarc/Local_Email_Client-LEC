@@ -10,40 +10,58 @@ namespace LEC.App;
 
 public partial class MoveFolderDialog : Window
 {
+    private readonly ProfileViewModel _sourceProfile;
     private readonly FolderNodeViewModel _sourceNode;
 
+    public ProfileViewModel? SelectedProfile { get; private set; }
     public int? SelectedFolderId { get; private set; }
 
-    public MoveFolderDialog(ProfileViewModel profile, FolderNodeViewModel sourceNode)
+    public MoveFolderDialog(IEnumerable<ProfileViewModel> openProfiles, ProfileViewModel sourceProfile, FolderNodeViewModel sourceNode)
     {
         InitializeComponent();
 
+        _sourceProfile = sourceProfile;
         _sourceNode = sourceNode;
 
         var converter = (MoveFolderDestinationValidityConverter)Resources["ValidityConverter"];
         converter.SourceNode = sourceNode;
+        converter.SourceProfile = sourceProfile;
 
-        FolderTreeView.ItemsSource = profile.FolderTree.RootNodes;
+        ProfilesItemsControl.ItemsSource = openProfiles;
     }
 
-    // "Pastas locais (raiz)" is always a valid destination: moving a folder to the root
-    // can never create a cycle (root is nobody's descendant), and DbxStore.MoveFolderAsync
-    // treats a no-op "already at root" move as a harmless reorder rather than an error.
-    // Clicking this label doesn't touch TreeView.SelectedItem, so there's no risk of
-    // TreeView_SelectedItemChanged firing and overwriting this right after.
+    // Each open profile's own "Pastas locais (raiz)" label is always a valid destination for
+    // that profile: root is nobody's descendant, and a no-op "already at root, same profile"
+    // move is a harmless reorder, not an error. Clicking this label doesn't touch any
+    // TreeView.SelectedItem, so there's no risk of TreeView_SelectedItemChanged firing and
+    // overwriting this choice right after.
     private void RootLabel_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
+        if (sender is not TextBlock { DataContext: ProfileViewModel profile })
+            return;
+
+        SelectedProfile = profile;
         SelectedFolderId = null;
         MoveButton.IsEnabled = true;
     }
 
     private void TreeView_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
     {
-        if (e.NewValue is not FolderNodeViewModel node)
+        if (sender is not TreeView { DataContext: ProfileViewModel profile } || e.NewValue is not FolderNodeViewModel node)
             return;
 
-        bool isValid = MoveFolderDestinationRules.IsValidDestination(node, _sourceNode);
-        SelectedFolderId = isValid ? node.Folder.Id : null;
+        bool isValid = MoveFolderDestinationRules.IsValidDestination(node, profile, _sourceNode, _sourceProfile);
+        if (isValid)
+        {
+            SelectedProfile = profile;
+            SelectedFolderId = node.Folder.Id;
+        }
+        else
+        {
+            SelectedProfile = null;
+            SelectedFolderId = null;
+        }
+
         MoveButton.IsEnabled = isValid;
     }
 
