@@ -27,7 +27,9 @@ public sealed class DbxStore : IMailStore
     private readonly DeletedMessageCache _deletedMessageCache;
     private readonly Dictionary<int, HashSet<int>> _deletedOffsetsByFolder = new();
 
-    private DbxStore(string profileDirectory, List<StoreFolder> folders, Dictionary<int, string?> backingFileNames, StoreHealth health, ScavengeCache scavengeCache, MovedMessageCache movedMessageCache, DeletedMessageCache deletedMessageCache)
+    private readonly HiddenFolderCache _hiddenFolderCache;
+
+    private DbxStore(string profileDirectory, List<StoreFolder> folders, Dictionary<int, string?> backingFileNames, StoreHealth health, ScavengeCache scavengeCache, MovedMessageCache movedMessageCache, DeletedMessageCache deletedMessageCache, HiddenFolderCache hiddenFolderCache)
     {
         _profileDirectory = profileDirectory;
         _folders = folders;
@@ -36,6 +38,7 @@ public sealed class DbxStore : IMailStore
         _scavengeCache = scavengeCache;
         _movedMessageCache = movedMessageCache;
         _deletedMessageCache = deletedMessageCache;
+        _hiddenFolderCache = hiddenFolderCache;
     }
 
     private static readonly char[] InvalidFileNameChars = { '\\', '/', ':', '*', '?', '"', '<', '>', '|' };
@@ -164,6 +167,78 @@ public sealed class DbxStore : IMailStore
     }
 
     /// <summary>
+    /// Hides a folder — and every folder in its subtree — from Folders, without touching
+    /// Folders.dbx or any message .dbx. The folder's own backing file (and every
+    /// descendant's) stays on disk untouched; only Folders/_backingFileNames and
+    /// HiddenFolderCache change.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when: <paramref name="folderId"/> does not match any existing (visible)
+    /// folder; or the folder, or any folder in its subtree, is a special folder
+    /// (SpecialFolderKind != None) — special folders can never be deleted, including as a
+    /// side effect of deleting an ancestor. Nothing is marked/removed if this is thrown —
+    /// the whole subtree is validated before any of it is hidden.
+    /// </exception>
+    /// <remarks>
+    /// Not idempotent: calling this twice for the same id throws on the second call,
+    /// because the first call already removed it from _folders (see Global Constraints in
+    /// the implementation plan for why this differs from DeleteMessageAsync).
+    /// Not thread-safe, same as every other mutating DbxStore member.
+    /// </remarks>
+    public Task DeleteFolderAsync(int folderId, CancellationToken ct = default)
+    {
+        return Task.Run(() =>
+        {
+            if (!_folders.Any(f => f.Id == folderId))
+                throw new InvalidOperationException($"Pasta {folderId} não encontrada.");
+
+            var subtreeIds = CollectSubtreeIds(folderId);
+
+            if (subtreeIds.Any(id => _folders.Single(f => f.Id == id).SpecialFolderKind != SpecialFolderKind.None))
+                throw new InvalidOperationException("Pastas especiais não podem ser apagadas.");
+
+            foreach (int id in subtreeIds)
+            {
+                _hiddenFolderCache.MarkHidden(_profileDirectory, id);
+                _folders.RemoveAll(f => f.Id == id);
+                _backingFileNames.Remove(id);
+
+                if (_openFolders.Remove(id, out var stale))
+                    stale.Dispose();
+                _messagesByFolder.Remove(id);
+                _hiddenOffsetsByFolder.Remove(id);
+                _deletedOffsetsByFolder.Remove(id);
+                _scavengeStatusByFolder.Remove(id);
+                _recoveredItemsByFolder.Remove(id);
+                _recoveredByFolder.Remove(id);
+            }
+        }, ct);
+    }
+
+    // folderId plus every folder transitively reachable from it via ParentId. A HashSet
+    // doubling as the visited-set makes this safe even against a pre-existing cyclic/dangling
+    // ParentId chain (the same kind FolderTreeViewModel.Build already has to tolerate on the
+    // UI side) -- Add returning false stops the walk from ever revisiting an id twice.
+    private HashSet<int> CollectSubtreeIds(int rootId)
+    {
+        var result = new HashSet<int>();
+        var stack = new Stack<int>();
+        stack.Push(rootId);
+
+        while (stack.Count > 0)
+        {
+            int id = stack.Pop();
+            if (!result.Add(id))
+                continue;
+
+            foreach (var child in _folders.Where(f => f.ParentId == id))
+                stack.Push(child.Id);
+        }
+
+        return result;
+    }
+
+    /// <summary>
     /// Appends a message to a folder — a from-scratch rewrite of that folder's backing
     /// .dbx (see DbxEmailFileWriter.Rebuild), same "flat tree, ≤255 items" approach as
     /// CreateFolderAsync/Folders.dbx.
@@ -253,7 +328,7 @@ public sealed class DbxStore : IMailStore
         }, ct);
     }
 
-    public static DbxStore Open(string profileDirectoryPath, string? scavengeCacheDatabasePath = null, string? movedMessageCacheDatabasePath = null, string? deletedMessageCacheDatabasePath = null)
+    public static DbxStore Open(string profileDirectoryPath, string? scavengeCacheDatabasePath = null, string? movedMessageCacheDatabasePath = null, string? deletedMessageCacheDatabasePath = null, string? hiddenFolderCacheDatabasePath = null)
     {
         string foldersDbxPath = Path.Combine(profileDirectoryPath, "Folders.dbx");
         using var folderFile = DbxFolderFile.Open(foldersDbxPath);
@@ -286,7 +361,21 @@ public sealed class DbxStore : IMailStore
         var scavengeCache = OpenScavengeCacheWithFallback(scavengeCacheDatabasePath ?? ScavengeCache.DefaultDatabasePath);
         var movedMessageCache = OpenMovedMessageCacheWithFallback(movedMessageCacheDatabasePath ?? MovedMessageCache.DefaultDatabasePath);
         var deletedMessageCache = OpenDeletedMessageCacheWithFallback(deletedMessageCacheDatabasePath ?? DeletedMessageCache.DefaultDatabasePath);
-        return new DbxStore(profileDirectoryPath, folders, backingFileNames, health, scavengeCache, movedMessageCache, deletedMessageCache);
+        var hiddenFolderCache = OpenHiddenFolderCacheWithFallback(hiddenFolderCacheDatabasePath ?? HiddenFolderCache.DefaultDatabasePath);
+
+        // Folders hidden by a previous DeleteFolderAsync call (this session or an earlier
+        // one — the cache is persistent) must never re-enter Folders/backingFileNames: this
+        // is the ONLY place that filter is applied, so every other DbxStore member (and
+        // every LEC.App consumer of Folders) never has to know a hidden folder ever existed.
+        var hiddenIds = hiddenFolderCache.GetHiddenFolderIds(profileDirectoryPath);
+        if (hiddenIds.Count > 0)
+        {
+            folders.RemoveAll(f => hiddenIds.Contains(f.Id));
+            foreach (int id in hiddenIds)
+                backingFileNames.Remove(id);
+        }
+
+        return new DbxStore(profileDirectoryPath, folders, backingFileNames, health, scavengeCache, movedMessageCache, deletedMessageCache, hiddenFolderCache);
     }
 
     // Global Constraint (design §8): cache unavailable (AppData not writable, disk full,
@@ -332,6 +421,19 @@ public sealed class DbxStore : IMailStore
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SqliteException)
         {
             return new DeletedMessageCache(":memory:");
+        }
+    }
+
+    // Same fallback reasoning as OpenScavengeCacheWithFallback, for the hidden-folder cache.
+    private static HiddenFolderCache OpenHiddenFolderCacheWithFallback(string databasePath)
+    {
+        try
+        {
+            return new HiddenFolderCache(databasePath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SqliteException)
+        {
+            return new HiddenFolderCache(":memory:");
         }
     }
 
@@ -631,5 +733,6 @@ public sealed class DbxStore : IMailStore
         _scavengeCache.Dispose();
         _movedMessageCache.Dispose();
         _deletedMessageCache.Dispose();
+        _hiddenFolderCache.Dispose();
     }
 }
