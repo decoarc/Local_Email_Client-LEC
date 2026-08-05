@@ -150,6 +150,62 @@ public partial class MainWindowViewModel : ObservableObject
     }
 
     /// <summary>
+    /// Deletes multiple messages, one at a time via the existing DeleteMessageAsync,
+    /// stopping at the first failure. Messages already deleted before the failure stay
+    /// deleted -- each message is its own atomic, independent operation, so there's
+    /// nothing to roll back.
+    /// </summary>
+    /// <exception cref="Exception">
+    /// Whatever DeleteMessageAsync throws for the failing message, rewrapped with a prefix
+    /// stating how many messages succeeded before it, e.g. "3 de 5 mensagens apagadas
+    /// antes de falhar: {mensagem original}".
+    /// </exception>
+    public async Task DeleteMessagesAsync(ProfileViewModel profile, IReadOnlyList<MessageHeader> messages, CancellationToken ct = default)
+    {
+        int succeeded = 0;
+        foreach (var message in messages)
+        {
+            try
+            {
+                await DeleteMessageAsync(profile, message, ct);
+                succeeded++;
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"{succeeded} de {messages.Count} mensagens apagadas antes de falhar: {ex.Message}", ex);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Moves multiple messages (all from the same source folder -- the message list only
+    /// ever shows one folder at a time) into a single chosen destination, one at a time via
+    /// the existing MoveMessageAsync, stopping at the first failure. Same "nothing to roll
+    /// back" reasoning as DeleteMessagesAsync.
+    /// </summary>
+    /// <exception cref="Exception">
+    /// Same rewrapping as DeleteMessagesAsync, e.g. "3 de 5 mensagens movidas antes de
+    /// falhar: {mensagem original}".
+    /// </exception>
+    public async Task MoveMessagesAsync(ProfileViewModel sourceProfile, IReadOnlyList<MessageHeader> messages,
+        ProfileViewModel destinationProfile, int destinationFolderId, CancellationToken ct = default)
+    {
+        int succeeded = 0;
+        foreach (var message in messages)
+        {
+            try
+            {
+                await MoveMessageAsync(sourceProfile, message, destinationProfile, destinationFolderId, ct);
+                succeeded++;
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"{succeeded} de {messages.Count} mensagens movidas antes de falhar: {ex.Message}", ex);
+            }
+        }
+    }
+
+    /// <summary>
     /// Moves a folder — same-profile is the existing cheap ParentId retarget
     /// (ProfileViewModel.MoveFolderAsync); cross-profile copies the whole subtree (folders +
     /// non-recovered messages) into destinationProfile, then hides it in sourceProfile via

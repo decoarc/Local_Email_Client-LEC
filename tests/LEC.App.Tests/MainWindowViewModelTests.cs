@@ -313,6 +313,173 @@ public class MainWindowViewModelTests
     }
 
     [Fact]
+    public async Task DeleteMessagesAsyncDeletesEachMessageInTheGivenOrder()
+    {
+        var folder = new StoreFolder { Id = 1, Name = "Origem", IsLoadable = true, HasBackingFile = true };
+        var store = new FakeMailStore(folders: new[] { folder });
+        var profile = new ProfileViewModel("Perfil", @"C:\perfis\Perfil", store);
+
+        var ref1 = new MessageRef(folder.Id, 1);
+        var ref2 = new MessageRef(folder.Id, 2);
+        var ref3 = new MessageRef(folder.Id, 3);
+        var messages = new List<MessageHeader>
+        {
+            new() { Id = ref1, Subject = "Um" },
+            new() { Id = ref2, Subject = "Dois" },
+            new() { Id = ref3, Subject = "Tres" },
+        };
+
+        var viewModel = new MainWindowViewModel();
+
+        await viewModel.DeleteMessagesAsync(profile, messages);
+
+        Assert.Contains(ref1, store.DeletedMessageRefs);
+        Assert.Contains(ref2, store.DeletedMessageRefs);
+        Assert.Contains(ref3, store.DeletedMessageRefs);
+    }
+
+    [Fact]
+    public async Task DeleteMessagesAsyncStopsAtTheFirstFailureLeavingEarlierSuccessesInPlace()
+    {
+        var folder = new StoreFolder { Id = 1, Name = "Origem", IsLoadable = true, HasBackingFile = true };
+        var store = new FakeMailStore(folders: new[] { folder });
+        var profile = new ProfileViewModel("Perfil", @"C:\perfis\Perfil", store);
+
+        var ref1 = new MessageRef(folder.Id, 1);
+        var ref2 = new MessageRef(folder.Id, 2);
+        var ref3 = new MessageRef(folder.Id, 3);
+        store.MessageRefToFailOn = ref2;
+        var messages = new List<MessageHeader>
+        {
+            new() { Id = ref1, Subject = "Um" },
+            new() { Id = ref2, Subject = "Dois" },
+            new() { Id = ref3, Subject = "Tres" },
+        };
+
+        var viewModel = new MainWindowViewModel();
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => viewModel.DeleteMessagesAsync(profile, messages));
+
+        Assert.Contains("1 de 3", ex.Message);
+        Assert.Contains(ref1, store.DeletedMessageRefs); // succeeded before the failure
+        Assert.DoesNotContain(ref2, store.DeletedMessageRefs); // this one failed
+        Assert.DoesNotContain(ref3, store.DeletedMessageRefs); // never attempted
+    }
+
+    [Fact]
+    public async Task DeleteMessagesAsyncWithASingleMessageBehavesLikeDeleteMessageAsync()
+    {
+        var folder = new StoreFolder { Id = 1, Name = "Origem", IsLoadable = true, HasBackingFile = true };
+        var store = new FakeMailStore(folders: new[] { folder });
+        var profile = new ProfileViewModel("Perfil", @"C:\perfis\Perfil", store);
+
+        var messageRef = new MessageRef(folder.Id, 1);
+        var messages = new List<MessageHeader> { new() { Id = messageRef, Subject = "Um" } };
+
+        var viewModel = new MainWindowViewModel();
+
+        await viewModel.DeleteMessagesAsync(profile, messages);
+
+        Assert.Contains(messageRef, store.DeletedMessageRefs);
+    }
+
+    [Fact]
+    public async Task MoveMessagesAsyncMovesEachMessageToTheSameDestination()
+    {
+        var sourceFolder = new StoreFolder { Id = 1, Name = "Origem", IsLoadable = true, HasBackingFile = true };
+        var ref1 = new MessageRef(sourceFolder.Id, 1);
+        var ref2 = new MessageRef(sourceFolder.Id, 2);
+        var sourceStore = new FakeMailStore(
+            folders: new[] { sourceFolder },
+            rawByRef: new Dictionary<MessageRef, byte[]>
+            {
+                [ref1] = "um"u8.ToArray(),
+                [ref2] = "dois"u8.ToArray(),
+            });
+        var sourceProfile = new ProfileViewModel("Origem", @"C:\perfis\Origem", sourceStore);
+
+        var destFolder = new StoreFolder { Id = 10, Name = "Destino", IsLoadable = true, HasBackingFile = true };
+        var destStore = new FakeMailStore(folders: new[] { destFolder });
+        var destProfile = new ProfileViewModel("Destino", @"C:\perfis\Destino", destStore);
+
+        var messages = new List<MessageHeader>
+        {
+            new() { Id = ref1, Subject = "Um" },
+            new() { Id = ref2, Subject = "Dois" },
+        };
+        var viewModel = new MainWindowViewModel();
+
+        await viewModel.MoveMessagesAsync(sourceProfile, messages, destProfile, destFolder.Id);
+
+        Assert.Equal(2, destStore.AddedMessages.Count);
+        Assert.All(destStore.AddedMessages, m => Assert.Equal(destFolder.Id, m.FolderId));
+        Assert.Contains(ref1, sourceStore.HiddenMessageRefs);
+        Assert.Contains(ref2, sourceStore.HiddenMessageRefs);
+    }
+
+    [Fact]
+    public async Task MoveMessagesAsyncStopsAtTheFirstFailureAndDoesNotHideTheRemainingMessages()
+    {
+        var sourceFolder = new StoreFolder { Id = 1, Name = "Origem", IsLoadable = true, HasBackingFile = true };
+        var ref1 = new MessageRef(sourceFolder.Id, 1);
+        var ref2 = new MessageRef(sourceFolder.Id, 2);
+        var ref3 = new MessageRef(sourceFolder.Id, 3);
+        var sourceStore = new FakeMailStore(
+            folders: new[] { sourceFolder },
+            rawByRef: new Dictionary<MessageRef, byte[]>
+            {
+                [ref1] = "um"u8.ToArray(),
+                [ref2] = "dois"u8.ToArray(),
+                [ref3] = "tres"u8.ToArray(),
+            });
+        var sourceProfile = new ProfileViewModel("Origem", @"C:\perfis\Origem", sourceStore);
+
+        var destFolder = new StoreFolder { Id = 10, Name = "Destino", IsLoadable = true, HasBackingFile = true };
+        var destStore = new FakeMailStore(folders: new[] { destFolder }) { SubjectToFailOn = "Dois" };
+        var destProfile = new ProfileViewModel("Destino", @"C:\perfis\Destino", destStore);
+
+        var messages = new List<MessageHeader>
+        {
+            new() { Id = ref1, Subject = "Um" },
+            new() { Id = ref2, Subject = "Dois" },
+            new() { Id = ref3, Subject = "Tres" },
+        };
+        var viewModel = new MainWindowViewModel();
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => viewModel.MoveMessagesAsync(sourceProfile, messages, destProfile, destFolder.Id));
+
+        Assert.Contains("1 de 3", ex.Message);
+        Assert.Contains(ref1, sourceStore.HiddenMessageRefs); // succeeded before the failure
+        Assert.DoesNotContain(ref2, sourceStore.HiddenMessageRefs); // this one failed to copy, so never hidden
+        Assert.DoesNotContain(ref3, sourceStore.HiddenMessageRefs); // never attempted
+        Assert.Single(destStore.AddedMessages); // only "Um" made it to the destination
+    }
+
+    [Fact]
+    public async Task MoveMessagesAsyncWithASingleMessageBehavesLikeMoveMessageAsync()
+    {
+        var sourceFolder = new StoreFolder { Id = 1, Name = "Origem", IsLoadable = true, HasBackingFile = true };
+        var messageRef = new MessageRef(sourceFolder.Id, 1);
+        var sourceStore = new FakeMailStore(
+            folders: new[] { sourceFolder },
+            rawByRef: new Dictionary<MessageRef, byte[]> { [messageRef] = "um"u8.ToArray() });
+        var sourceProfile = new ProfileViewModel("Origem", @"C:\perfis\Origem", sourceStore);
+
+        var destFolder = new StoreFolder { Id = 10, Name = "Destino", IsLoadable = true, HasBackingFile = true };
+        var destStore = new FakeMailStore(folders: new[] { destFolder });
+        var destProfile = new ProfileViewModel("Destino", @"C:\perfis\Destino", destStore);
+
+        var messages = new List<MessageHeader> { new() { Id = messageRef, Subject = "Um" } };
+        var viewModel = new MainWindowViewModel();
+
+        await viewModel.MoveMessagesAsync(sourceProfile, messages, destProfile, destFolder.Id);
+
+        Assert.Single(destStore.AddedMessages);
+        Assert.Contains(messageRef, sourceStore.HiddenMessageRefs);
+    }
+
+    [Fact]
     public async Task MoveFolderAsyncWithinTheSameProfileDelegatesToProfileViewModel()
     {
         var folderA = new StoreFolder { Id = 1, Name = "A", IsLoadable = true, HasBackingFile = true };

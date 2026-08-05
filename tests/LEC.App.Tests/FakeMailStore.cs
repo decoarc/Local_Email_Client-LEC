@@ -81,6 +81,10 @@ internal sealed class FakeMailStore : IMailStore
     }
 
     public Exception? ExceptionToThrowOnAddMessage { get; set; }
+    // Same reasoning as MessageRefToFailOn above, but AddMessageAsync has no MessageRef to
+    // key on (the destination call only carries the header fields) -- Subject is unique
+    // enough in a controlled test's message set to identify which one should fail.
+    public string? SubjectToFailOn { get; set; }
     public List<(int FolderId, byte[] RawMessage, string? Subject, string? SenderName, string? SenderAddress, string? MessageId, DateTime? DateUtc)> AddedMessages { get; } = new();
 
     public Task AddMessageAsync(int folderId, byte[] rawMessage, string? subject, string? senderName,
@@ -88,6 +92,8 @@ internal sealed class FakeMailStore : IMailStore
     {
         if (ExceptionToThrowOnAddMessage is { } ex)
             throw ex;
+        if (subject == SubjectToFailOn)
+            throw new InvalidOperationException("falha simulada de mover mensagem");
 
         AddedMessages.Add((folderId, rawMessage, subject, senderName, senderAddress, messageId, dateUtc));
         return Task.CompletedTask;
@@ -103,8 +109,17 @@ internal sealed class FakeMailStore : IMailStore
 
     public HashSet<MessageRef> DeletedMessageRefs { get; } = new();
 
+    // Lets a batch-delete test control exactly which message in a sequence fails (a blanket
+    // "always throw" property wouldn't let any earlier message in the same batch succeed
+    // first, which is exactly the scenario DeleteMessagesAsync's stop-on-failure behavior
+    // needs to exercise).
+    public MessageRef? MessageRefToFailOn { get; set; }
+
     public Task DeleteMessageAsync(MessageRef id, CancellationToken ct = default)
     {
+        if (MessageRefToFailOn == id)
+            throw new InvalidOperationException("falha simulada de apagar mensagem");
+
         DeletedMessageRefs.Add(id);
         return Task.CompletedTask;
     }
