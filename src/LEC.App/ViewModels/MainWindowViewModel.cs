@@ -129,4 +129,14 @@ public partial class MainWindowViewModel : ObservableObject
 
         await sourceProfile.Store.HideMovedMessageAsync(message.Id, ct);
     }
+
+    /// <summary>
+    /// Deletes a message — hides it from its folder via IMailStore.DeleteMessageAsync,
+    /// never writes to the backing .dbx. Thin pass-through: unlike MoveMessageAsync, there's
+    /// no second store to orchestrate against.
+    /// </summary>
+    public async Task DeleteMessageAsync(ProfileViewModel profile, MessageHeader message, CancellationToken ct = default)
+    {
+        await profile.Store.DeleteMessageAsync(message.Id, ct);
+    }
 }

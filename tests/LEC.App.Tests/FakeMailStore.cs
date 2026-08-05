@@ -101,6 +101,14 @@ internal sealed class FakeMailStore : IMailStore
         return Task.CompletedTask;
     }
 
+    public HashSet<MessageRef> DeletedMessageRefs { get; } = new();
+
+    public Task DeleteMessageAsync(MessageRef id, CancellationToken ct = default)
+    {
+        DeletedMessageRefs.Add(id);
+        return Task.CompletedTask;
+    }
+
     public bool WasDisposed { get; private set; }
 
     public void Dispose() => WasDisposed = true;

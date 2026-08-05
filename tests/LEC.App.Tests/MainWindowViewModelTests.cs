@@ -272,4 +272,20 @@ public class MainWindowViewModelTests
         Assert.Empty(store.AddedMessages);
         Assert.Empty(store.HiddenMessageRefs);
     }
+
+    [Fact]
+    public async Task DeleteMessageAsyncCallsTheStoresDeleteMessageAsync()
+    {
+        var folder = new StoreFolder { Id = 1, Name = "Origem", IsLoadable = true, HasBackingFile = true };
+        var messageRef = new MessageRef(folder.Id, 500);
+        var store = new FakeMailStore(folders: new[] { folder });
+        var profile = new ProfileViewModel("Perfil", @"C:\perfis\Perfil", store);
+
+        var header = new MessageHeader { Id = messageRef, Subject = "Assunto" };
+        var viewModel = new MainWindowViewModel();
+
+        await viewModel.DeleteMessageAsync(profile, header);
+
+        Assert.Contains(messageRef, store.DeletedMessageRefs);
+    }
 }
