@@ -1,4 +1,5 @@
 // tests/LEC.App.Tests/MainWindowViewModelTests.cs
+using System.Linq;
 using LEC.App.ViewModels;
 using LEC.MailStore;
 using Xunit;
@@ -309,5 +310,142 @@ public class MainWindowViewModelTests
         await viewModel.DeleteMessageAsync(profile, header);
 
         Assert.Contains(messageRef, store.DeletedMessageRefs);
+    }
+
+    [Fact]
+    public async Task MoveFolderAsyncWithinTheSameProfileDelegatesToProfileViewModel()
+    {
+        var folderA = new StoreFolder { Id = 1, Name = "A", IsLoadable = true, HasBackingFile = true };
+        var folderB = new StoreFolder { Id = 2, Name = "B", IsLoadable = true, HasBackingFile = true };
+        var store = new FakeMailStore(folders: new[] { folderA, folderB });
+        var profile = new ProfileViewModel("P", @"C:\perfis\P", store);
+
+        var viewModel = new MainWindowViewModel();
+
+        await viewModel.MoveFolderAsync(profile, profile.FolderTree.RootNodes.Single(n => n.Folder.Id == folderA.Id),
+            profile, folderB.Id);
+
+        Assert.Contains((folderA.Id, (int?)folderB.Id), store.MovedFolders);
+        Assert.Empty(store.AddedMessages);
+        Assert.Empty(store.DeletedFolderIds);
+    }
+
+    [Fact]
+    public async Task MoveFolderAsyncAcrossProfilesCopiesTheWholeSubtreeExcludingRecoveredItemsAndHidesTheSource()
+    {
+        var rootFolder = new StoreFolder { Id = 1, ParentId = null, Name = "Notas", IsLoadable = true, HasBackingFile = true };
+        var childFolder = new StoreFolder { Id = 2, ParentId = 1, Name = "2026", IsLoadable = true, HasBackingFile = true };
+
+        var normalRootRef = new MessageRef(1, 100);
+        var recoveredRootRef = new MessageRef(1, 101);
+        var normalChildRef = new MessageRef(2, 200);
+
+        var sourceStore = new FakeMailStore(
+            folders: new[] { rootFolder, childFolder },
+            headersByFolder: new()
+            {
+                [1] = new()
+                {
+                    new MessageHeader { Id = normalRootRef, Subject = "Oi", SenderName = "Ana", MessageId = "<m1>", Date = new DateTime(2004, 1, 1) },
+                    new MessageHeader { Id = recoveredRootRef, Subject = "Fragmento", RecoveredKind = RecoveredMessageKind.Recovered },
+                },
+                [2] = new()
+                {
+                    new MessageHeader { Id = normalChildRef, Subject = "Sub" },
+                },
+            },
+            // Deliberately no entry for recoveredRootRef: if the implementation ever tried to
+            // copy it, OpenMessageAsync would throw "No raw bytes registered" and fail this test.
+            rawByRef: new Dictionary<MessageRef, byte[]>
+            {
+                [normalRootRef] = "conteudo-raiz"u8.ToArray(),
+                [normalChildRef] = "conteudo-filha"u8.ToArray(),
+            });
+        var sourceProfile = new ProfileViewModel("Origem", @"C:\perfis\Origem", sourceStore);
+
+        var destStore = new FakeMailStore(folders: Array.Empty<StoreFolder>());
+        var destProfile = new ProfileViewModel("Destino", @"C:\perfis\Destino", destStore);
+
+        var viewModel = new MainWindowViewModel();
+        var sourceNode = sourceProfile.FolderTree.RootNodes.Single();
+
+        await viewModel.MoveFolderAsync(sourceProfile, sourceNode, destProfile, destinationParentId: null);
+
+        var destNotas = Assert.Single(destStore.Folders, f => f.Name == "Notas");
+        var dest2026 = Assert.Single(destStore.Folders, f => f.Name == "2026");
+        Assert.Equal(destNotas.Id, dest2026.ParentId);
+
+        Assert.Equal(2, destStore.AddedMessages.Count); // recovered item excluded
+        Assert.Contains(destStore.AddedMessages, m => m.FolderId == destNotas.Id && m.Subject == "Oi");
+        Assert.Contains(destStore.AddedMessages, m => m.FolderId == dest2026.Id && m.Subject == "Sub");
+
+        Assert.Contains(rootFolder.Id, sourceStore.DeletedFolderIds);
+    }
+
+    [Fact]
+    public async Task MoveFolderAsyncAcrossProfilesRejectsASpecialSourceFolderBeforeCopyingAnything()
+    {
+        var specialFolder = new StoreFolder { Id = 1, Name = "Caixa de entrada", SpecialFolderKind = SpecialFolderKind.Inbox, IsLoadable = true, HasBackingFile = true };
+        var sourceStore = new FakeMailStore(folders: new[] { specialFolder });
+        var sourceProfile = new ProfileViewModel("Origem", @"C:\perfis\Origem", sourceStore);
+
+        var destStore = new FakeMailStore(folders: Array.Empty<StoreFolder>());
+        var destProfile = new ProfileViewModel("Destino", @"C:\perfis\Destino", destStore);
+
+        var viewModel = new MainWindowViewModel();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            viewModel.MoveFolderAsync(sourceProfile, sourceProfile.FolderTree.RootNodes.Single(), destProfile, null));
+
+        Assert.Empty(destStore.Folders);
+        Assert.Empty(sourceStore.DeletedFolderIds);
+    }
+
+    [Fact]
+    public async Task MoveFolderAsyncAcrossProfilesRejectsWhenASpecialFolderIsNestedInTheSubtree()
+    {
+        var rootFolder = new StoreFolder { Id = 1, ParentId = null, Name = "Raiz", IsLoadable = true, HasBackingFile = true };
+        var specialChild = new StoreFolder { Id = 2, ParentId = 1, Name = "Enviados", SpecialFolderKind = SpecialFolderKind.SentItems, IsLoadable = true, HasBackingFile = true };
+        var sourceStore = new FakeMailStore(folders: new[] { rootFolder, specialChild });
+        var sourceProfile = new ProfileViewModel("Origem", @"C:\perfis\Origem", sourceStore);
+
+        var destStore = new FakeMailStore(folders: Array.Empty<StoreFolder>());
+        var destProfile = new ProfileViewModel("Destino", @"C:\perfis\Destino", destStore);
+
+        var viewModel = new MainWindowViewModel();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            viewModel.MoveFolderAsync(sourceProfile, sourceProfile.FolderTree.RootNodes.Single(), destProfile, null));
+
+        Assert.Empty(destStore.Folders);
+        Assert.Empty(sourceStore.DeletedFolderIds);
+    }
+
+    [Fact]
+    public async Task MoveFolderAsyncAcrossProfilesDoesNotHideTheSourceWhenACopyStepFailsAndLeavesThePartialCopyInPlace()
+    {
+        var rootFolder = new StoreFolder { Id = 1, ParentId = null, Name = "Notas", IsLoadable = true, HasBackingFile = true };
+        var messageRef = new MessageRef(1, 100);
+        var sourceStore = new FakeMailStore(
+            folders: new[] { rootFolder },
+            headersByFolder: new() { [1] = new() { new MessageHeader { Id = messageRef, Subject = "Oi" } } },
+            rawByRef: new Dictionary<MessageRef, byte[]> { [messageRef] = "conteudo"u8.ToArray() });
+        var sourceProfile = new ProfileViewModel("Origem", @"C:\perfis\Origem", sourceStore);
+
+        var destStore = new FakeMailStore(folders: Array.Empty<StoreFolder>())
+        {
+            ExceptionToThrowOnAddMessage = new InvalidOperationException("pasta de destino cheia"),
+        };
+        var destProfile = new ProfileViewModel("Destino", @"C:\perfis\Destino", destStore);
+
+        var viewModel = new MainWindowViewModel();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            viewModel.MoveFolderAsync(sourceProfile, sourceProfile.FolderTree.RootNodes.Single(), destProfile, null));
+
+        // The folder itself was created before the message copy failed -- it stays behind as
+        // an accepted partial duplicate; only hiding the source is refused.
+        Assert.Single(destStore.Folders);
+        Assert.Empty(sourceStore.DeletedFolderIds);
     }
 }

@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.IO;
+using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 using LEC.DbxFormat;
 using LEC.MailStore;
@@ -146,5 +147,71 @@ public partial class MainWindowViewModel : ObservableObject
     public async Task DeleteMessageAsync(ProfileViewModel profile, MessageHeader message, CancellationToken ct = default)
     {
         await profile.Store.DeleteMessageAsync(message.Id, ct);
+    }
+
+    /// <summary>
+    /// Moves a folder — same-profile is the existing cheap ParentId retarget
+    /// (ProfileViewModel.MoveFolderAsync); cross-profile copies the whole subtree (folders +
+    /// non-recovered messages) into destinationProfile, then hides it in sourceProfile via
+    /// the already-shipped DeleteFolderAsync — never touches sourceProfile's Folders.dbx or
+    /// any message .dbx. Nothing is hidden in the source unless the ENTIRE subtree copied
+    /// successfully first.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when sourceNode's folder, or any folder in its subtree, is special
+    /// (SpecialFolderKind != None) — checked before any copying starts. For a cross-profile
+    /// move, also propagates whatever CreateFolderAsync/AddMessageAsync throws on the
+    /// destination profile (name collision, 255-item caps, damaged files) — the source is
+    /// left completely untouched in every one of those cases, though whatever was already
+    /// created in the destination before the failure is not rolled back.
+    /// </exception>
+    public async Task MoveFolderAsync(ProfileViewModel sourceProfile, FolderNodeViewModel sourceNode,
+        ProfileViewModel destinationProfile, int? destinationParentId, CancellationToken ct = default)
+    {
+        if (ReferenceEquals(sourceProfile, destinationProfile))
+        {
+            await sourceProfile.MoveFolderAsync(sourceNode.Folder.Id, destinationParentId);
+            return;
+        }
+
+        if (sourceNode.Folder.SpecialFolderKind != SpecialFolderKind.None || ContainsSpecial(sourceNode))
+            throw new InvalidOperationException("Pastas especiais não podem ser movidas.");
+
+        await CopyFolderSubtreeAsync(sourceProfile, sourceNode, destinationProfile, destinationParentId, ct);
+
+        await sourceProfile.DeleteFolderAsync(sourceNode.Folder.Id);
+    }
+
+    private static bool ContainsSpecial(FolderNodeViewModel node) =>
+        node.Children.Any(c => c.Folder.SpecialFolderKind != SpecialFolderKind.None || ContainsSpecial(c));
+
+    // Recreates one folder in destinationProfile (under destinationParentId), copies every
+    // non-recovered message from it, then recurses into every child using the newly created
+    // folder's id as the next level's parent. sourceNode.Children can never contain a cycle
+    // (FolderTreeViewModel.Build already resolved any at UI-tree-build time), so no
+    // visited-set is needed here.
+    private async Task CopyFolderSubtreeAsync(ProfileViewModel sourceProfile, FolderNodeViewModel sourceNode,
+        ProfileViewModel destinationProfile, int? destinationParentId, CancellationToken ct)
+    {
+        var created = await destinationProfile.CreateFolderAsync(sourceNode.DisplayName, destinationParentId);
+
+        if (sourceNode.Folder.HasBackingFile)
+        {
+            await foreach (var header in sourceProfile.Store.EnumerateHeadersAsync(sourceNode.Folder, ct))
+            {
+                if (header.RecoveredKind is not null)
+                    continue;
+
+                using var stream = await sourceProfile.Store.OpenMessageAsync(header.Id, ct);
+                using var ms = new MemoryStream();
+                await stream.CopyToAsync(ms, ct);
+
+                await destinationProfile.Store.AddMessageAsync(created.Id, ms.ToArray(),
+                    header.Subject, header.SenderName, header.SenderAddress, header.MessageId, header.Date, ct);
+            }
+        }
+
+        foreach (var child in sourceNode.Children)
+            await CopyFolderSubtreeAsync(sourceProfile, child, destinationProfile, created.Id, ct);
     }
 }
