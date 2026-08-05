@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using LEC.App.Services;
 using LEC.App.ViewModels;
@@ -501,6 +502,55 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             MessageBox.Show(this, ex.Message, "LEC — Não foi possível mover a mensagem", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private async void DeleteMessage_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as MenuItem)?.DataContext is not MessageHeader header)
+            return;
+
+        await ConfirmAndDeleteAsync(header);
+    }
+
+    private async void MessageListView_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Delete)
+            return;
+        if (MessageListView.SelectedItem is not MessageHeader header)
+            return;
+
+        e.Handled = true;
+        await ConfirmAndDeleteAsync(header);
+    }
+
+    private async Task ConfirmAndDeleteAsync(MessageHeader header)
+    {
+        if (_selectedProfile is not { } profile)
+            return;
+
+        var result = MessageBox.Show(this, "Apagar esta mensagem?", "LEC — Apagar mensagem",
+            MessageBoxButton.YesNo, MessageBoxImage.Question);
+        if (result != MessageBoxResult.Yes)
+            return;
+
+        try
+        {
+            await _viewModel.DeleteMessageAsync(profile, header);
+
+            // The deleted message is now hidden from the folder currently on screen --
+            // reload that folder's list so it disappears, and clear the reading pane in
+            // case it was showing the message that just got deleted (same visual reset
+            // MoveMessage_Click/CloseProfile_Click already use for "nothing selected").
+            if (_selectedNode is { } node)
+                await _viewModel.SelectFolderAsync(profile, node);
+
+            NavigateToRenderedMessage(string.Empty);
+            ImagesBlockedBar.Visibility = Visibility.Collapsed;
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "LEC — Não foi possível apagar a mensagem", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 

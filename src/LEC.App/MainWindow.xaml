@@ -101,6 +101,7 @@
                     <ListView x:Name="MessageListView"
                               ItemsSource="{Binding MessageList.Messages}"
                               SelectionChanged="MessageListView_SelectionChanged"
+                              KeyDown="MessageListView_KeyDown"
                               VirtualizingPanel.IsVirtualizing="True"
                               VirtualizingPanel.VirtualizationMode="Recycling">
                         <ListView.ItemContainerStyle>
@@ -113,6 +114,13 @@
                                                 <MenuItem.Style>
                                                     <Style TargetType="MenuItem">
                                                         <EventSetter Event="Click" Handler="MoveMessage_Click"/>
+                                                    </Style>
+                                                </MenuItem.Style>
+                                            </MenuItem>
+                                            <MenuItem Header="Apagar">
+                                                <MenuItem.Style>
+                                                    <Style TargetType="MenuItem">
+                                                        <EventSetter Event="Click" Handler="DeleteMessage_Click"/>
                                                     </Style>
                                                 </MenuItem.Style>
                                             </MenuItem>
