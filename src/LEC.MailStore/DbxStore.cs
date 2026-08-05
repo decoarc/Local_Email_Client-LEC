@@ -239,6 +239,92 @@ public sealed class DbxStore : IMailStore
     }
 
     /// <summary>
+    /// Moves a folder to a new parent within this store — a from-scratch rewrite of
+    /// Folders.dbx (see DbxFolderFileWriter.Rebuild) that changes only the moved folder's
+    /// ParentId entry. Every descendant folder's own entry is untouched: since the tree is
+    /// defined entirely by ParentId, the whole subtree "comes along" without needing any
+    /// other entry to change.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when: <paramref name="folderId"/> does not match any existing folder; the
+    /// folder is special (SpecialFolderKind != None); <paramref name="newParentId"/> is
+    /// non-null and does not match any existing folder; <paramref name="newParentId"/> is
+    /// the folder itself or one of its own descendants (would create a cycle); a sibling
+    /// folder under <paramref name="newParentId"/> already has this folder's name
+    /// (case-insensitive, same rule as CreateFolderAsync); or Folders.dbx on disk is
+    /// damaged (Health != StoreHealth.Ok).
+    /// </exception>
+    public Task MoveFolderAsync(int folderId, int? newParentId, CancellationToken ct = default)
+    {
+        return Task.Run(() =>
+        {
+            var folder = _folders.FirstOrDefault(f => f.Id == folderId)
+                ?? throw new InvalidOperationException($"Pasta {folderId} não encontrada.");
+
+            if (folder.SpecialFolderKind != SpecialFolderKind.None)
+                throw new InvalidOperationException("Pastas especiais não podem ser movidas.");
+
+            if (newParentId is int pid && !_folders.Any(f => f.Id == pid))
+                throw new InvalidOperationException($"Pasta-mãe {pid} não encontrada.");
+
+            // Cycle guard: walk up from newParentId via ParentId; folderId must never appear.
+            // The visited-set also protects against looping forever if the tree already has
+            // an unrelated pre-existing cycle (same tolerance CollectSubtreeIds needs).
+            var visited = new HashSet<int>();
+            int? cursor = newParentId;
+            while (cursor is int cursorId)
+            {
+                if (cursorId == folderId)
+                    throw new InvalidOperationException(
+                        "Não é possível mover uma pasta para dentro dela mesma ou de uma pasta descendente.");
+                if (!visited.Add(cursorId))
+                    break;
+                cursor = _folders.FirstOrDefault(f => f.Id == cursorId)?.ParentId;
+            }
+
+            if (_folders.Any(f => f.Id != folderId && f.ParentId == newParentId
+                    && string.Equals(f.Name, folder.Name, StringComparison.OrdinalIgnoreCase)))
+                throw new InvalidOperationException($"Já existe uma pasta chamada \"{folder.Name}\" no mesmo nível.");
+
+            string foldersDbxPath = Path.Combine(_profileDirectory, "Folders.dbx");
+
+            List<DbxFolderWriteEntry> entries;
+            using (var current = DbxFolderFile.Open(foldersDbxPath))
+            {
+                if (current.Health != StoreHealth.Ok)
+                    throw new InvalidOperationException(
+                        "Folders.dbx está danificado; mover uma pasta reescreveria o arquivo e descartaria as pastas ilegíveis.");
+
+                entries = current.Folders
+                    .Select(f => new DbxFolderWriteEntry(
+                        f.FolderId,
+                        f.FolderId == folderId ? (newParentId ?? -1) : f.ParentId,
+                        f.Name ?? "", f.FileName, f.Flags, f.MessageCount, f.SpecialFolderType))
+                    .ToList();
+            }
+
+            string pristinePath = foldersDbxPath + ".original";
+            if (!File.Exists(pristinePath))
+                File.Copy(foldersDbxPath, pristinePath);
+            File.Copy(foldersDbxPath, foldersDbxPath + ".bak", overwrite: true);
+
+            DbxFolderFileWriter.Rebuild(foldersDbxPath, entries);
+
+            int index = _folders.FindIndex(f => f.Id == folderId);
+            _folders[index] = new StoreFolder
+            {
+                Id = folder.Id,
+                ParentId = newParentId,
+                Name = folder.Name,
+                SpecialFolderKind = folder.SpecialFolderKind,
+                MessageCount = folder.MessageCount,
+                IsLoadable = folder.IsLoadable,
+                HasBackingFile = folder.HasBackingFile,
+            };
+        }, ct);
+    }
+
+    /// <summary>
     /// Appends a message to a folder — a from-scratch rewrite of that folder's backing
     /// .dbx (see DbxEmailFileWriter.Rebuild), same "flat tree, ≤255 items" approach as
     /// CreateFolderAsync/Folders.dbx.
