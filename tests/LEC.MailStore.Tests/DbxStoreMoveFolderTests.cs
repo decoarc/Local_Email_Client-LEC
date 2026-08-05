@@ -232,6 +232,31 @@ public class DbxStoreMoveFolderTests
     }
 
     [Fact]
+    public async Task MoveFolderAsyncIntoARealDestinationFolderSetsParentIdAndPersistsAcrossReopen()
+    {
+        string dir = BuildProfile();
+        try
+        {
+            // Folder 5 (Trabalho)'s only child is folder 6, named "Notas 2026" -- different
+            // from folder 4's name ("Notas 2026 Q1"), so this move is collision-free. Unlike
+            // every other "successful move" test in this file, the destination here is a
+            // real folder rather than root (newParentId: null).
+            using (var store = DbxStore.Open(dir))
+            {
+                await store.MoveFolderAsync(4, newParentId: 5);
+                Assert.Equal(5, store.Folders.Single(f => f.Id == 4).ParentId);
+            }
+
+            using var reopened = DbxStore.Open(dir);
+            Assert.Equal(5, reopened.Folders.Single(f => f.Id == 4).ParentId);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task MoveFolderAsyncPersistsAcrossReopen()
     {
         string dir = BuildProfile();

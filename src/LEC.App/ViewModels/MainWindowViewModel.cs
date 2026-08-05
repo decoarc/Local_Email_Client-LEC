@@ -56,10 +56,18 @@ public partial class MainWindowViewModel : ObservableObject
         if (wasActive)
         {
             ActiveProfile = null;
-            MessageList = null;
-            MessageReader = null;
-            CurrentFolderScavengeStatus = null;
+            ClearCurrentFolder();
         }
+    }
+
+    // Resets the message list / reading pane state for the currently displayed folder.
+    // Used whenever that folder stops being valid to show: the owning profile was closed,
+    // or the folder itself was just deleted or moved out from under the current selection.
+    public void ClearCurrentFolder()
+    {
+        MessageList = null;
+        MessageReader = null;
+        CurrentFolderScavengeStatus = null;
     }
 
     public async Task SelectFolderAsync(ProfileViewModel profile, FolderNodeViewModel node, CancellationToken ct = default)

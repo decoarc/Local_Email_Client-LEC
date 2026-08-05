@@ -254,6 +254,9 @@ public sealed class DbxStore : IMailStore
     /// (case-insensitive, same rule as CreateFolderAsync); or Folders.dbx on disk is
     /// damaged (Health != StoreHealth.Ok).
     /// </exception>
+    /// <remarks>
+    /// Not thread-safe, same as every other mutating DbxStore member.
+    /// </remarks>
     public Task MoveFolderAsync(int folderId, int? newParentId, CancellationToken ct = default)
     {
         return Task.Run(() =>

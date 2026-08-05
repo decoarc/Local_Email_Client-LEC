@@ -153,6 +153,28 @@ public class MainWindowViewModelTests
     }
 
     [Fact]
+    public async Task ClearCurrentFolderClearsMessageListReaderAndScavengeStatus()
+    {
+        var folder = new StoreFolder { Id = 1, Name = "X", IsLoadable = true, HasBackingFile = true };
+        var store = new FakeMailStore(folders: new[] { folder });
+        var profile = new ProfileViewModel("Perfil", @"C:\perfil", store);
+
+        var vm = new MainWindowViewModel();
+        vm.OpenProfiles.Add(profile);
+        await vm.SelectFolderAsync(profile, new FolderNodeViewModel(folder));
+
+        vm.ClearCurrentFolder();
+
+        Assert.Null(vm.MessageList);
+        Assert.Null(vm.MessageReader);
+        Assert.Null(vm.CurrentFolderScavengeStatus);
+        // Unlike CloseProfile, ClearCurrentFolder leaves the profile itself open/active --
+        // it only resets the message list / reading pane for whatever folder was showing.
+        Assert.Same(profile, vm.ActiveProfile);
+        Assert.Contains(profile, vm.OpenProfiles);
+    }
+
+    [Fact]
     public async Task CloseProfileOnANonActiveProfileLeavesTheActiveProfileUntouched()
     {
         var folderA = new StoreFolder { Id = 1, Name = "A", IsLoadable = true, HasBackingFile = true };

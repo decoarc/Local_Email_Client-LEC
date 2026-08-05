@@ -371,6 +371,7 @@ public partial class MainWindow : Window
                 RecoverableBar.Visibility = Visibility.Collapsed;
                 NavigateToRenderedMessage(string.Empty);
                 ImagesBlockedBar.Visibility = Visibility.Collapsed;
+                _viewModel.ClearCurrentFolder();
             }
         }
         catch (Exception ex)
@@ -434,6 +435,7 @@ public partial class MainWindow : Window
                 RecoverableBar.Visibility = Visibility.Collapsed;
                 NavigateToRenderedMessage(string.Empty);
                 ImagesBlockedBar.Visibility = Visibility.Collapsed;
+                _viewModel.ClearCurrentFolder();
             }
         }
         catch (Exception ex)

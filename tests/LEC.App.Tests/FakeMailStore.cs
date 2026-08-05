@@ -130,9 +130,12 @@ internal sealed class FakeMailStore : IMailStore
         if (ExceptionToThrowOnMoveFolder is { } ex)
             throw ex;
 
+        int index = _folders.FindIndex(f => f.Id == folderId);
+        if (index < 0)
+            throw new InvalidOperationException($"Pasta {folderId} não encontrada.");
+
         MovedFolders.Add((folderId, newParentId));
 
-        int index = _folders.FindIndex(f => f.Id == folderId);
         var current = _folders[index];
         _folders[index] = new StoreFolder
         {
