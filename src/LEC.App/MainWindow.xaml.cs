@@ -330,6 +330,118 @@ public partial class MainWindow : Window
         }
     }
 
+    private void DeleteFolder_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as MenuItem)?.DataContext is not FolderNodeViewModel node)
+            return;
+        if ((sender as MenuItem)?.Parent is not ContextMenu { PlacementTarget: FrameworkElement placementTarget })
+            return;
+        if (FindAncestor<TreeView>(placementTarget) is not { DataContext: ProfileViewModel profile } treeView)
+            return;
+
+        _ = ConfirmAndDeleteFolderAsync(profile, node, treeView);
+    }
+
+    private async Task ConfirmAndDeleteFolderAsync(ProfileViewModel profile, FolderNodeViewModel node, TreeView treeView)
+    {
+        var result = MessageBox.Show(this,
+            $"Apagar a pasta \"{node.DisplayName}\" e tudo dentro dela (subpastas e mensagens)?",
+            "LEC — Apagar pasta", MessageBoxButton.YesNo, MessageBoxImage.Question);
+        if (result != MessageBoxResult.Yes)
+            return;
+
+        // The old tree (still in memory, pre-rebuild) is what tells us whether the current
+        // selection lived inside the subtree about to disappear -- profile.DeleteFolderAsync
+        // below replaces every node in profile.FolderTree with brand-new instances, so this
+        // check has to happen against the node we already have, not anything read afterward.
+        bool selectionIsInsideDeletedSubtree = ReferenceEquals(_selectedProfile, profile)
+            && _selectedNode is { } current
+            && (ReferenceEquals(current, node) || IsDescendantOf(node, current));
+
+        treeView.IsEnabled = false;
+        try
+        {
+            await profile.DeleteFolderAsync(node.Folder.Id);
+
+            if (selectionIsInsideDeletedSubtree)
+            {
+                _selectedNode = null;
+                _selectedTreeView = null;
+                ScavengeButton.Visibility = Visibility.Collapsed;
+                RecoverableBar.Visibility = Visibility.Collapsed;
+                NavigateToRenderedMessage(string.Empty);
+                ImagesBlockedBar.Visibility = Visibility.Collapsed;
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "LEC — Não foi possível apagar a pasta", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            treeView.IsEnabled = true;
+        }
+    }
+
+    // True if `candidate` is `ancestor` itself or appears anywhere in its subtree. Used to
+    // decide whether the currently-selected folder is about to be hidden by a delete two
+    // levels up (e.g. selection is a grandchild of the folder the user right-clicked).
+    private static bool IsDescendantOf(FolderNodeViewModel ancestor, FolderNodeViewModel candidate)
+    {
+        foreach (var child in ancestor.Children)
+        {
+            if (ReferenceEquals(child, candidate) || IsDescendantOf(child, candidate))
+                return true;
+        }
+        return false;
+    }
+
+    private async void MoveFolder_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as MenuItem)?.DataContext is not FolderNodeViewModel node)
+            return;
+        if ((sender as MenuItem)?.Parent is not ContextMenu { PlacementTarget: FrameworkElement placementTarget })
+            return;
+        if (FindAncestor<TreeView>(placementTarget) is not { DataContext: ProfileViewModel profile } treeView)
+            return;
+
+        try
+        {
+            var dialog = new MoveFolderDialog(profile, node) { Owner = this };
+            if (dialog.ShowDialog() != true)
+                return;
+
+            treeView.IsEnabled = false;
+            try
+            {
+                await profile.MoveFolderAsync(node.Folder.Id, dialog.SelectedFolderId);
+            }
+            finally
+            {
+                treeView.IsEnabled = true;
+            }
+
+            // FolderTree.Build (inside profile.MoveFolderAsync) just replaced every node in
+            // this tree -- reset unconditionally rather than replicating
+            // ConfirmAndDeleteFolderAsync's subtree check: moving the folder that happens to
+            // be selected is the single most common reason to open "Mover pasta..." in the
+            // first place, so the check would almost always fire anyway.
+            if (ReferenceEquals(_selectedProfile, profile))
+            {
+                _selectedNode = null;
+                _selectedTreeView = null;
+                ScavengeButton.Visibility = Visibility.Collapsed;
+                RecoverableBar.Visibility = Visibility.Collapsed;
+                NavigateToRenderedMessage(string.Empty);
+                ImagesBlockedBar.Visibility = Visibility.Collapsed;
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "LEC — Não foi possível mover a pasta", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
     // Percorre a árvore visual a partir de `start` até achar um ancestral do tipo T --
     // necessário porque um ContextMenu não está na mesma árvore visual do elemento que
     // abriu ele (é uma Popup separada); PlacementTarget é o único elo de volta.

@@ -14,6 +14,7 @@
         <conv:RecoveredKindToLabelConverter x:Key="RecoveredKindToLabelConverter"/>
         <conv:RecoveredKindToRowBrushConverter x:Key="RecoveredKindToRowBrushConverter"/>
         <conv:AttachmentListToVisibilityConverter x:Key="AttachmentListToVisibilityConverter"/>
+        <conv:SpecialToVisibilityConverter x:Key="SpecialToVisibilityConverter"/>
     </Window.Resources>
     <DockPanel>
         <Menu DockPanel.Dock="Top">
@@ -62,6 +63,10 @@
                                                 <TextBlock.ContextMenu>
                                                     <ContextMenu>
                                                         <MenuItem Header="Nova subpasta aqui..." Click="NewSubfolder_Click"/>
+                                                        <MenuItem Header="Mover pasta..." Click="MoveFolder_Click"
+                                                                  Visibility="{Binding IsSpecial, Converter={StaticResource SpecialToVisibilityConverter}}"/>
+                                                        <MenuItem Header="Apagar pasta" Click="DeleteFolder_Click"
+                                                                  Visibility="{Binding IsSpecial, Converter={StaticResource SpecialToVisibilityConverter}}"/>
                                                     </ContextMenu>
                                                 </TextBlock.ContextMenu>
                                             </TextBlock>
