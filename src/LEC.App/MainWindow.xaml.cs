@@ -617,28 +617,36 @@ public partial class MainWindow : Window
         if (_selectedProfile is not { } sourceProfile)
             return;
 
+        var dialog = new MoveMessageDialog(_viewModel.OpenProfiles, sourceProfile, messages[0].Id.FolderId) { Owner = this };
+        if (dialog.ShowDialog() != true || dialog.SelectedProfile is not { } destinationProfile || dialog.SelectedFolderId is not { } destinationFolderId)
+            return;
+
+        Exception? failure = null;
         try
         {
-            var dialog = new MoveMessageDialog(_viewModel.OpenProfiles, sourceProfile, messages[0].Id.FolderId) { Owner = this };
-            if (dialog.ShowDialog() != true || dialog.SelectedProfile is not { } destinationProfile || dialog.SelectedFolderId is not { } destinationFolderId)
-                return;
-
             await _viewModel.MoveMessagesAsync(sourceProfile, messages, destinationProfile, destinationFolderId);
-
-            // The moved messages are now hidden from the folder currently on screen (its
-            // source) -- reload that folder's list so they disappear, and clear the reading
-            // pane in case it was showing one of them (same visual reset CloseProfile_Click
-            // already uses for "nothing selected").
-            if (_selectedProfile is { } profile && _selectedNode is { } node)
-                await _viewModel.SelectFolderAsync(profile, node);
-
-            NavigateToRenderedMessage(string.Empty);
-            ImagesBlockedBar.Visibility = Visibility.Collapsed;
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, "LEC — Não foi possível mover a mensagem", MessageBoxButton.OK, MessageBoxImage.Warning);
+            failure = ex;
         }
+
+        // The moved messages -- all of them on success, or whichever ones completed before a
+        // partial failure -- are now hidden from the folder currently on screen (its source),
+        // so reload that folder's list unconditionally so they disappear, and clear the
+        // reading pane in case it was showing one of them (same visual reset
+        // CloseProfile_Click already uses for "nothing selected"). This must run even when
+        // the batch above threw partway through: skipping it would leave already-moved
+        // messages showing as stale rows, and retrying the same selection would move (i.e.
+        // duplicate) them again.
+        if (_selectedProfile is { } profile && _selectedNode is { } node)
+            await _viewModel.SelectFolderAsync(profile, node);
+
+        NavigateToRenderedMessage(string.Empty);
+        ImagesBlockedBar.Visibility = Visibility.Collapsed;
+
+        if (failure is not null)
+            MessageBox.Show(this, failure.Message, "LEC — Não foi possível mover a mensagem", MessageBoxButton.OK, MessageBoxImage.Warning);
     }
 
     private async void DeleteMessage_Click(object sender, RoutedEventArgs e)
@@ -674,28 +682,34 @@ public partial class MainWindow : Window
         if (result != MessageBoxResult.Yes)
             return;
 
+        Exception? failure = null;
         try
         {
             await _viewModel.DeleteMessagesAsync(sourceProfile, messages);
-
-            // The deleted messages are now hidden from the folder currently on screen --
-            // reload that folder's list so they disappear, and clear the reading pane in
-            // case it was showing one of them (same visual reset MoveMessage_Click/
-            // CloseProfile_Click already use for "nothing selected"). Re-read both
-            // _selectedProfile/_selectedNode together here, exactly as MoveMessage_Click
-            // does, rather than pairing a pre-await profile with a post-await node -- the
-            // user's selection could in principle have moved on during the confirmation
-            // dialog and the delete call.
-            if (_selectedProfile is { } profile && _selectedNode is { } node)
-                await _viewModel.SelectFolderAsync(profile, node);
-
-            NavigateToRenderedMessage(string.Empty);
-            ImagesBlockedBar.Visibility = Visibility.Collapsed;
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, "LEC — Não foi possível apagar a mensagem", MessageBoxButton.OK, MessageBoxImage.Warning);
+            failure = ex;
         }
+
+        // The deleted messages -- all of them on success, or whichever ones completed before
+        // a partial failure -- are now hidden from the folder currently on screen, so reload
+        // that folder's list unconditionally so they disappear, and clear the reading pane in
+        // case it was showing one of them (same visual reset MoveMessage_Click/
+        // CloseProfile_Click already use for "nothing selected"). Re-read both
+        // _selectedProfile/_selectedNode together here, exactly as MoveMessage_Click does,
+        // rather than pairing a pre-await profile with a post-await node -- the user's
+        // selection could in principle have moved on during the confirmation dialog and the
+        // delete call. This must run even when the batch above threw partway through: skipping
+        // it would leave already-deleted messages showing as stale rows on screen.
+        if (_selectedProfile is { } profile && _selectedNode is { } node)
+            await _viewModel.SelectFolderAsync(profile, node);
+
+        NavigateToRenderedMessage(string.Empty);
+        ImagesBlockedBar.Visibility = Visibility.Collapsed;
+
+        if (failure is not null)
+            MessageBox.Show(this, failure.Message, "LEC — Não foi possível apagar a mensagem", MessageBoxButton.OK, MessageBoxImage.Warning);
     }
 
     private void NavigateToRenderedMessage(string html)

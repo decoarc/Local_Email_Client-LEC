@@ -155,7 +155,7 @@ public partial class MainWindowViewModel : ObservableObject
     /// deleted -- each message is its own atomic, independent operation, so there's
     /// nothing to roll back.
     /// </summary>
-    /// <exception cref="Exception">
+    /// <exception cref="InvalidOperationException">
     /// Whatever DeleteMessageAsync throws for the failing message, rewrapped with a prefix
     /// stating how many messages succeeded before it, e.g. "3 de 5 mensagens apagadas
     /// antes de falhar: {mensagem original}".
@@ -170,7 +170,7 @@ public partial class MainWindowViewModel : ObservableObject
                 await DeleteMessageAsync(profile, message, ct);
                 succeeded++;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 throw new InvalidOperationException($"{succeeded} de {messages.Count} mensagens apagadas antes de falhar: {ex.Message}", ex);
             }
@@ -183,7 +183,16 @@ public partial class MainWindowViewModel : ObservableObject
     /// the existing MoveMessageAsync, stopping at the first failure. Same "nothing to roll
     /// back" reasoning as DeleteMessagesAsync.
     /// </summary>
-    /// <exception cref="Exception">
+    /// <remarks>
+    /// Known limitation — no progress indicator or cancellation, and cost scales with the
+    /// destination's size. Each message in the batch goes through MoveMessageAsync's
+    /// AddMessageAsync call, which triggers a full DbxEmailFileWriter.Rebuild of the
+    /// destination folder's backing .dbx. Moving a large batch into an already-large
+    /// destination is therefore proportionally expensive I/O -- N rebuilds, each over a
+    /// folder that keeps growing -- with nothing shown to the user while it runs. Accepted
+    /// for this slice; not treated as a defect.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
     /// Same rewrapping as DeleteMessagesAsync, e.g. "3 de 5 mensagens movidas antes de
     /// falhar: {mensagem original}".
     /// </exception>
@@ -198,7 +207,7 @@ public partial class MainWindowViewModel : ObservableObject
                 await MoveMessageAsync(sourceProfile, message, destinationProfile, destinationFolderId, ct);
                 succeeded++;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 throw new InvalidOperationException($"{succeeded} de {messages.Count} mensagens movidas antes de falhar: {ex.Message}", ex);
             }
