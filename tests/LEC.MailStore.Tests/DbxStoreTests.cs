@@ -460,6 +460,9 @@ public class DbxStoreTests
             var dois = before.Single(h => h.Subject == "Dois");
 
             await store.DeleteMessageAsync(um.Id);
+            Assert.Equal(new[] { "Dois" },
+                (await CollectAsync(store.EnumerateHeadersAsync(folder))).Select(h => h.Subject));
+
             await store.HideMovedMessageAsync(dois.Id);
 
             // Both are hidden from the list -- but each only through its own cache.
@@ -469,6 +472,79 @@ public class DbxStoreTests
         {
             Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
             File.Delete(movedCacheDbPath);
+            File.Delete(deletedCacheDbPath);
+        }
+    }
+
+    [Fact]
+    public async Task DeleteMessageAsyncAlsoHidesARecoveredScavengedItem()
+    {
+        var localFolders = new TestDbxBuilder();
+        localFolders.WriteHeader(DbxFileType.Folder);
+        int inboxNode = localFolders.WriteInfoNode(new[]
+        {
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxFolderFieldId.FolderId, Direct = true, DirectValue = 1 },
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxFolderFieldId.Name, Data = "Caixa de entrada\0"u8.ToArray() },
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxFolderFieldId.FileName, Data = "Inbox.dbx\0"u8.ToArray() },
+        });
+        int root = localFolders.WriteIndexNode(nextTable: 0, ptrCount: 1, indexCount: 0,
+            entries: new[] { (indexPtr: inboxNode, entryNextTable: 0, entryIndexCount: 0) });
+        localFolders.SetInt32At(LEC.DbxFormat.DbxFormat.HeaderItemCountOffset, 1);
+        localFolders.SetInt32At(LEC.DbxFormat.DbxFormat.HeaderIndexPointerOffset, root);
+
+        using var profile = new TestProfileBuilder();
+        profile.WriteFoldersDbx(localFolders.ToArray());
+
+        // One normal, index-tree-reachable message plus one orphan block that only the
+        // scavenger can find (DbxScavenger.Scan excludes offsets the index tree already
+        // covers, so exactly the orphan comes back as a recovered item). Both blocks are
+        // written before any info/index node: WriteMessageBlock pads itself to a 4-byte
+        // boundary but WriteInfoNode/WriteIndexNode do not, and the scavenger only probes
+        // 4-byte-aligned offsets -- an orphan written after a node can land unaligned and
+        // be silently invisible to the scan.
+        var inboxMessages = new TestDbxBuilder();
+        inboxMessages.WriteHeader(DbxFileType.Email);
+        int block = inboxMessages.WriteMessageBlock("conteudo"u8.ToArray(), nextOffset: 0);
+        inboxMessages.WriteMessageBlock("From: c@d.com\r\nSubject: Orfa\r\n\r\nCorpo orfao"u8.ToArray(), nextOffset: 0);
+        int msgNode = inboxMessages.WriteInfoNode(new[]
+        {
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxEmailFieldId.MessageBlockOffset, Direct = true, DirectValue = (uint)block },
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxEmailFieldId.Subject, Data = "Normal\0"u8.ToArray() },
+        });
+        int msgRoot = inboxMessages.WriteIndexNode(nextTable: 0, ptrCount: 1, indexCount: 0,
+            entries: new[] { (indexPtr: msgNode, entryNextTable: 0, entryIndexCount: 0) });
+        inboxMessages.SetInt32At(LEC.DbxFormat.DbxFormat.HeaderItemCountOffset, 1);
+        inboxMessages.SetInt32At(LEC.DbxFormat.DbxFormat.HeaderIndexPointerOffset, msgRoot);
+        profile.WriteEmailDbx("Inbox.dbx", inboxMessages.ToArray());
+
+        string scavengeCacheDbPath = Path.Combine(Path.GetTempPath(), $"lec-scavenge-{Guid.NewGuid():N}.db");
+        string deletedCacheDbPath = Path.Combine(Path.GetTempPath(), $"lec-deleted-{Guid.NewGuid():N}.db");
+        try
+        {
+            using var store = DbxStore.Open(profile.ProfileDirectory,
+                scavengeCacheDatabasePath: scavengeCacheDbPath, deletedMessageCacheDatabasePath: deletedCacheDbPath);
+            var folder = store.Folders.Single();
+
+            await store.ScavengeAsync(folder);
+            store.SetScavengeVisibility(folder, visible: true);
+
+            var before = await CollectAsync(store.EnumerateHeadersAsync(folder));
+            var recovered = Assert.Single(before, h => h.RecoveredKind is not null);
+            Assert.Equal("Orfa", recovered.Subject);
+            Assert.Contains(before, h => h.Subject == "Normal");
+
+            await store.DeleteMessageAsync(recovered.Id);
+
+            // The recovered row must disappear just like a normal one does -- the
+            // recovered-items loop honors the deleted hide-set too.
+            var after = await CollectAsync(store.EnumerateHeadersAsync(folder));
+            Assert.DoesNotContain(after, h => h.Id == recovered.Id);
+            Assert.Equal(new[] { "Normal" }, after.Select(h => h.Subject));
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            File.Delete(scavengeCacheDbPath);
             File.Delete(deletedCacheDbPath);
         }
     }

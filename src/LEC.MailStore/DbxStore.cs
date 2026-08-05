@@ -178,11 +178,11 @@ public sealed class DbxStore : IMailStore
     /// </exception>
     /// <remarks>
     /// Not thread-safe: this mutates shared, unsynchronized in-memory state (_openFolders,
-    /// _messagesByFolder, _hiddenOffsetsByFolder, _scavengeStatusByFolder,
-    /// _recoveredItemsByFolder, _recoveredByFolder) as well as the folder's .dbx on disk.
-    /// Concurrent calls against the same DbxStore instance — including a concurrent
-    /// EnumerateHeadersAsync/OpenMessageAsync on the same folder — must be serialized by the
-    /// caller, exactly as CreateFolderAsync already requires.
+    /// _messagesByFolder, _hiddenOffsetsByFolder, _deletedOffsetsByFolder,
+    /// _scavengeStatusByFolder, _recoveredItemsByFolder, _recoveredByFolder) as well as the
+    /// folder's .dbx on disk. Concurrent calls against the same DbxStore instance —
+    /// including a concurrent EnumerateHeadersAsync/OpenMessageAsync on the same folder —
+    /// must be serialized by the caller, exactly as CreateFolderAsync already requires.
     /// </remarks>
     public Task AddMessageAsync(int folderId, byte[] rawMessage, string? subject, string? senderName,
         string? senderAddress, string? messageId, DateTime? dateUtc, CancellationToken ct = default)
@@ -231,14 +231,15 @@ public sealed class DbxStore : IMailStore
             DbxEmailFileWriter.Rebuild(filePath, entries);
 
             // Rebuild rewrote the file from scratch, so every byte offset inside it changed.
-            // Both caches key on offsets into this exact file -- MovedMessageCache on
-            // index_node_offset, ScavengeCache on recovered_item.chain_offset -- so every
-            // cached row for this folder is now meaningless, and a stale offset that
-            // coincidentally matches something in the new layout is *silent* corruption
-            // (a wrong message hidden, a recovered item pointing at unrelated bytes).
-            // Purge rather than try to preserve: losing "this was moved away" back into
-            // view is an accepted, visible, inspectable tradeoff. Re-keying hiding on a
-            // rebuild-stable identity is a deliberately deferred design change.
+            // All three caches key on offsets into this exact file -- MovedMessageCache and
+            // DeletedMessageCache on index_node_offset, ScavengeCache on
+            // recovered_item.chain_offset -- so every cached row for this folder is now
+            // meaningless, and a stale offset that coincidentally matches something in the
+            // new layout is *silent* corruption (a wrong message hidden, a recovered item
+            // pointing at unrelated bytes). Purge rather than try to preserve: losing "this
+            // was moved/deleted" back into view is an accepted, visible, inspectable
+            // tradeoff. Re-keying hiding on a rebuild-stable identity is a deliberately
+            // deferred design change.
             _movedMessageCache.ClearFolder(_profileDirectory, fileName);
             _hiddenOffsetsByFolder.Remove(folderId);
 
@@ -397,6 +398,9 @@ public sealed class DbxStore : IMailStore
             foreach (var item in recoveredItems)
             {
                 ct.ThrowIfCancellationRequested();
+                if (hiddenOffsets.Contains(item.ChainOffset) || deletedOffsets.Contains(item.ChainOffset))
+                    continue;
+
                 // ChainOffset re-purposes MessageRef's IndexNodeOffset slot as an opaque
                 // "wherever this is in the file" identifier -- a recovered item has no real
                 // index node (that's exactly what the tree lost), but the two are always in
