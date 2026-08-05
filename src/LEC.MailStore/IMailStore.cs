@@ -67,4 +67,13 @@ public interface IMailStore : IDisposable
     /// called twice for the same message.
     /// </summary>
     Task HideMovedMessageAsync(MessageRef id, CancellationToken ct = default);
+
+    /// <summary>
+    /// Marks a message as deleted — EnumerateHeadersAsync stops returning it from now on.
+    /// Never writes to the backing .dbx; purely a local, app-side "hide" marker (see
+    /// DeletedMessageCache), kept separate from HideMovedMessageAsync's marker even though
+    /// the mechanism is identical. A no-op, not an error, if called twice for the same
+    /// message.
+    /// </summary>
+    Task DeleteMessageAsync(MessageRef id, CancellationToken ct = default);
 }

@@ -24,7 +24,10 @@ public sealed class DbxStore : IMailStore
     private readonly MovedMessageCache _movedMessageCache;
     private readonly Dictionary<int, HashSet<int>> _hiddenOffsetsByFolder = new();
 
-    private DbxStore(string profileDirectory, List<StoreFolder> folders, Dictionary<int, string?> backingFileNames, StoreHealth health, ScavengeCache scavengeCache, MovedMessageCache movedMessageCache)
+    private readonly DeletedMessageCache _deletedMessageCache;
+    private readonly Dictionary<int, HashSet<int>> _deletedOffsetsByFolder = new();
+
+    private DbxStore(string profileDirectory, List<StoreFolder> folders, Dictionary<int, string?> backingFileNames, StoreHealth health, ScavengeCache scavengeCache, MovedMessageCache movedMessageCache, DeletedMessageCache deletedMessageCache)
     {
         _profileDirectory = profileDirectory;
         _folders = folders;
@@ -32,6 +35,7 @@ public sealed class DbxStore : IMailStore
         Health = health;
         _scavengeCache = scavengeCache;
         _movedMessageCache = movedMessageCache;
+        _deletedMessageCache = deletedMessageCache;
     }
 
     private static readonly char[] InvalidFileNameChars = { '\\', '/', ':', '*', '?', '"', '<', '>', '|' };
@@ -238,6 +242,9 @@ public sealed class DbxStore : IMailStore
             _movedMessageCache.ClearFolder(_profileDirectory, fileName);
             _hiddenOffsetsByFolder.Remove(folderId);
 
+            _deletedMessageCache.ClearFolder(_profileDirectory, fileName);
+            _deletedOffsetsByFolder.Remove(folderId);
+
             _scavengeCache.ClearScan(_profileDirectory, fileName);
             _scavengeStatusByFolder.Remove(folderId);
             _recoveredItemsByFolder.Remove(folderId);
@@ -245,7 +252,7 @@ public sealed class DbxStore : IMailStore
         }, ct);
     }
 
-    public static DbxStore Open(string profileDirectoryPath, string? scavengeCacheDatabasePath = null, string? movedMessageCacheDatabasePath = null)
+    public static DbxStore Open(string profileDirectoryPath, string? scavengeCacheDatabasePath = null, string? movedMessageCacheDatabasePath = null, string? deletedMessageCacheDatabasePath = null)
     {
         string foldersDbxPath = Path.Combine(profileDirectoryPath, "Folders.dbx");
         using var folderFile = DbxFolderFile.Open(foldersDbxPath);
@@ -277,7 +284,8 @@ public sealed class DbxStore : IMailStore
         var health = folderFile.Health; // read before the `using` disposes folderFile below
         var scavengeCache = OpenScavengeCacheWithFallback(scavengeCacheDatabasePath ?? ScavengeCache.DefaultDatabasePath);
         var movedMessageCache = OpenMovedMessageCacheWithFallback(movedMessageCacheDatabasePath ?? MovedMessageCache.DefaultDatabasePath);
-        return new DbxStore(profileDirectoryPath, folders, backingFileNames, health, scavengeCache, movedMessageCache);
+        var deletedMessageCache = OpenDeletedMessageCacheWithFallback(deletedMessageCacheDatabasePath ?? DeletedMessageCache.DefaultDatabasePath);
+        return new DbxStore(profileDirectoryPath, folders, backingFileNames, health, scavengeCache, movedMessageCache, deletedMessageCache);
     }
 
     // Global Constraint (design §8): cache unavailable (AppData not writable, disk full,
@@ -313,6 +321,19 @@ public sealed class DbxStore : IMailStore
         }
     }
 
+    // Same fallback reasoning as OpenScavengeCacheWithFallback, for the deleted-message cache.
+    private static DeletedMessageCache OpenDeletedMessageCacheWithFallback(string databasePath)
+    {
+        try
+        {
+            return new DeletedMessageCache(databasePath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SqliteException)
+        {
+            return new DeletedMessageCache(":memory:");
+        }
+    }
+
     private static SpecialFolderKind ToSpecialFolderKind(DbxSpecialFolderType type) => type switch
     {
         DbxSpecialFolderType.Inbox => SpecialFolderKind.Inbox,
@@ -338,10 +359,13 @@ public sealed class DbxStore : IMailStore
         EnsureMovedLoaded(folder);
         var hiddenOffsets = _hiddenOffsetsByFolder[folder.Id];
 
+        EnsureDeletedLoaded(folder);
+        var deletedOffsets = _deletedOffsetsByFolder[folder.Id];
+
         foreach (var info in emailFile.Messages)
         {
             ct.ThrowIfCancellationRequested();
-            if (hiddenOffsets.Contains(info.IndexNodeOffset))
+            if (hiddenOffsets.Contains(info.IndexNodeOffset) || deletedOffsets.Contains(info.IndexNodeOffset))
                 continue;
 
             var reference = new MessageRef(folder.Id, info.IndexNodeOffset);
@@ -518,6 +542,48 @@ public sealed class DbxStore : IMailStore
         }, ct);
     }
 
+    private void EnsureDeletedLoaded(StoreFolder folder)
+    {
+        if (_deletedOffsetsByFolder.ContainsKey(folder.Id))
+            return;
+
+        if (!_backingFileNames.TryGetValue(folder.Id, out var fileName) || fileName is null)
+        {
+            _deletedOffsetsByFolder[folder.Id] = new HashSet<int>();
+            return;
+        }
+
+        _deletedOffsetsByFolder[folder.Id] = _deletedMessageCache.GetDeletedOffsets(_profileDirectory, fileName);
+    }
+
+    /// <summary>
+    /// Records that a message was deleted, so EnumerateHeadersAsync stops listing it — the
+    /// source .dbx itself is never touched.
+    /// </summary>
+    /// <remarks>
+    /// Not thread-safe: this mutates the unsynchronized _deletedOffsetsByFolder dictionary
+    /// (and writes to the shared DeletedMessageCache connection). Concurrent calls against
+    /// the same DbxStore instance must be serialized by the caller, exactly as
+    /// HideMovedMessageAsync already requires.
+    /// </remarks>
+    public Task DeleteMessageAsync(MessageRef id, CancellationToken ct = default)
+    {
+        return Task.Run(() =>
+        {
+            if (!_backingFileNames.TryGetValue(id.FolderId, out var fileName) || fileName is null)
+                return;
+
+            _deletedMessageCache.MarkDeleted(_profileDirectory, fileName, id.IndexNodeOffset);
+
+            if (!_deletedOffsetsByFolder.TryGetValue(id.FolderId, out var offsets))
+            {
+                offsets = new HashSet<int>();
+                _deletedOffsetsByFolder[id.FolderId] = offsets;
+            }
+            offsets.Add(id.IndexNodeOffset);
+        }, ct);
+    }
+
     private DbxEmailFile? TryOpenFolderFile(string fileName)
     {
         string path = Path.Combine(_profileDirectory, fileName);
@@ -560,5 +626,6 @@ public sealed class DbxStore : IMailStore
         _openFolders.Clear();
         _scavengeCache.Dispose();
         _movedMessageCache.Dispose();
+        _deletedMessageCache.Dispose();
     }
 }

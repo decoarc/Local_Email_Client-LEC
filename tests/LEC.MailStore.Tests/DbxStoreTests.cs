@@ -346,6 +346,133 @@ public class DbxStoreTests
         }
     }
 
+    [Fact]
+    public async Task DeleteMessageAsyncRemovesTheMessageFromEnumerateHeadersAsyncAndPersistsAcrossReopen()
+    {
+        var localFolders = new TestDbxBuilder();
+        localFolders.WriteHeader(DbxFileType.Folder);
+        int inboxNode = localFolders.WriteInfoNode(new[]
+        {
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxFolderFieldId.FolderId, Direct = true, DirectValue = 1 },
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxFolderFieldId.Name, Data = "Caixa de entrada\0"u8.ToArray() },
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxFolderFieldId.FileName, Data = "Inbox.dbx\0"u8.ToArray() },
+        });
+        int root = localFolders.WriteIndexNode(nextTable: 0, ptrCount: 1, indexCount: 0,
+            entries: new[] { (indexPtr: inboxNode, entryNextTable: 0, entryIndexCount: 0) });
+        localFolders.SetInt32At(LEC.DbxFormat.DbxFormat.HeaderItemCountOffset, 1);
+        localFolders.SetInt32At(LEC.DbxFormat.DbxFormat.HeaderIndexPointerOffset, root);
+
+        using var profile = new TestProfileBuilder();
+        profile.WriteFoldersDbx(localFolders.ToArray());
+
+        var inboxMessages = new TestDbxBuilder();
+        inboxMessages.WriteHeader(DbxFileType.Email);
+        int block = inboxMessages.WriteMessageBlock("conteudo"u8.ToArray(), nextOffset: 0);
+        int msgNode = inboxMessages.WriteInfoNode(new[]
+        {
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxEmailFieldId.MessageBlockOffset, Direct = true, DirectValue = (uint)block },
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxEmailFieldId.Subject, Data = "Assunto\0"u8.ToArray() },
+        });
+        int msgRoot = inboxMessages.WriteIndexNode(nextTable: 0, ptrCount: 1, indexCount: 0,
+            entries: new[] { (indexPtr: msgNode, entryNextTable: 0, entryIndexCount: 0) });
+        inboxMessages.SetInt32At(LEC.DbxFormat.DbxFormat.HeaderItemCountOffset, 1);
+        inboxMessages.SetInt32At(LEC.DbxFormat.DbxFormat.HeaderIndexPointerOffset, msgRoot);
+        profile.WriteEmailDbx("Inbox.dbx", inboxMessages.ToArray());
+
+        string deletedCacheDbPath = Path.Combine(Path.GetTempPath(), $"lec-deleted-{Guid.NewGuid():N}.db");
+        try
+        {
+            StoreFolder folder;
+            using (var store = DbxStore.Open(profile.ProfileDirectory, deletedMessageCacheDatabasePath: deletedCacheDbPath))
+            {
+                folder = store.Folders.Single();
+
+                var headersBefore = await CollectAsync(store.EnumerateHeadersAsync(folder));
+                var header = Assert.Single(headersBefore);
+
+                await store.DeleteMessageAsync(header.Id);
+
+                var headersAfterSameSession = await CollectAsync(store.EnumerateHeadersAsync(folder));
+                Assert.Empty(headersAfterSameSession);
+            }
+
+            using var reopened = DbxStore.Open(profile.ProfileDirectory, deletedMessageCacheDatabasePath: deletedCacheDbPath);
+            var headersAfterReopen = await CollectAsync(reopened.EnumerateHeadersAsync(folder));
+            Assert.Empty(headersAfterReopen);
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            File.Delete(deletedCacheDbPath);
+        }
+    }
+
+    [Fact]
+    public async Task DeleteMessageAsyncAndHideMovedMessageAsyncAreIndependent()
+    {
+        var localFolders = new TestDbxBuilder();
+        localFolders.WriteHeader(DbxFileType.Folder);
+        int inboxNode = localFolders.WriteInfoNode(new[]
+        {
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxFolderFieldId.FolderId, Direct = true, DirectValue = 1 },
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxFolderFieldId.Name, Data = "Caixa de entrada\0"u8.ToArray() },
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxFolderFieldId.FileName, Data = "Inbox.dbx\0"u8.ToArray() },
+        });
+        int root = localFolders.WriteIndexNode(nextTable: 0, ptrCount: 1, indexCount: 0,
+            entries: new[] { (indexPtr: inboxNode, entryNextTable: 0, entryIndexCount: 0) });
+        localFolders.SetInt32At(LEC.DbxFormat.DbxFormat.HeaderItemCountOffset, 1);
+        localFolders.SetInt32At(LEC.DbxFormat.DbxFormat.HeaderIndexPointerOffset, root);
+
+        using var profile = new TestProfileBuilder();
+        profile.WriteFoldersDbx(localFolders.ToArray());
+
+        var inboxMessages = new TestDbxBuilder();
+        inboxMessages.WriteHeader(DbxFileType.Email);
+        int blockA = inboxMessages.WriteMessageBlock("um"u8.ToArray(), nextOffset: 0);
+        int nodeA = inboxMessages.WriteInfoNode(new[]
+        {
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxEmailFieldId.MessageBlockOffset, Direct = true, DirectValue = (uint)blockA },
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxEmailFieldId.Subject, Data = "Um\0"u8.ToArray() },
+        });
+        int blockB = inboxMessages.WriteMessageBlock("dois"u8.ToArray(), nextOffset: 0);
+        int nodeB = inboxMessages.WriteInfoNode(new[]
+        {
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxEmailFieldId.MessageBlockOffset, Direct = true, DirectValue = (uint)blockB },
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxEmailFieldId.Subject, Data = "Dois\0"u8.ToArray() },
+        });
+        int msgRoot = inboxMessages.WriteIndexNode(nextTable: 0, ptrCount: 2, indexCount: 0,
+            entries: new[] { (indexPtr: nodeA, entryNextTable: 0, entryIndexCount: 0),
+                              (indexPtr: nodeB, entryNextTable: 0, entryIndexCount: 0) });
+        inboxMessages.SetInt32At(LEC.DbxFormat.DbxFormat.HeaderItemCountOffset, 2);
+        inboxMessages.SetInt32At(LEC.DbxFormat.DbxFormat.HeaderIndexPointerOffset, msgRoot);
+        profile.WriteEmailDbx("Inbox.dbx", inboxMessages.ToArray());
+
+        string movedCacheDbPath = Path.Combine(Path.GetTempPath(), $"lec-moved-{Guid.NewGuid():N}.db");
+        string deletedCacheDbPath = Path.Combine(Path.GetTempPath(), $"lec-deleted-{Guid.NewGuid():N}.db");
+        try
+        {
+            using var store = DbxStore.Open(profile.ProfileDirectory,
+                movedMessageCacheDatabasePath: movedCacheDbPath, deletedMessageCacheDatabasePath: deletedCacheDbPath);
+            var folder = store.Folders.Single();
+
+            var before = await CollectAsync(store.EnumerateHeadersAsync(folder));
+            var um = before.Single(h => h.Subject == "Um");
+            var dois = before.Single(h => h.Subject == "Dois");
+
+            await store.DeleteMessageAsync(um.Id);
+            await store.HideMovedMessageAsync(dois.Id);
+
+            // Both are hidden from the list -- but each only through its own cache.
+            Assert.Empty(await CollectAsync(store.EnumerateHeadersAsync(folder)));
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            File.Delete(movedCacheDbPath);
+            File.Delete(deletedCacheDbPath);
+        }
+    }
+
     private static async Task<List<MessageHeader>> CollectAsync(IAsyncEnumerable<MessageHeader> source)
     {
         var list = new List<MessageHeader>();

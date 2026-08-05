@@ -299,6 +299,49 @@ public class DbxStoreAddMessageTests
         }
     }
 
+    [Fact]
+    public async Task AddMessageAsyncPurgesStaleDeletedOffsetsWhenTheFolderIsAlsoADeleteTarget()
+    {
+        string dir = BuildProfileWithOneEmptyFolder();
+        string deletedCacheDbPath = Path.Combine(Path.GetTempPath(), $"lec-deleted-{Guid.NewGuid():N}.db");
+        try
+        {
+            DbxEmailFileWriter.Rebuild(Path.Combine(dir, "Destino.dbx"), new[]
+            {
+                new DbxMessageWriteEntry(Encoding.UTF8.GetBytes("um"), "Um", null, null, null, null),
+                new DbxMessageWriteEntry(Encoding.UTF8.GetBytes("dois"), "Dois", null, null, null, null),
+            });
+
+            StoreFolder folder;
+            using (var store = DbxStore.Open(dir, deletedMessageCacheDatabasePath: deletedCacheDbPath))
+            {
+                folder = store.Folders.Single();
+
+                var before = await CollectAsync(store.EnumerateHeadersAsync(folder));
+                Assert.Equal(2, before.Count);
+
+                await store.DeleteMessageAsync(before.Single(h => h.Subject == "Um").Id);
+                Assert.Equal(new[] { "Dois" },
+                    (await CollectAsync(store.EnumerateHeadersAsync(folder))).Select(h => h.Subject));
+
+                await store.AddMessageAsync(folder.Id, Encoding.UTF8.GetBytes("tres"), "Tres", null, null, null, null);
+
+                var after = await CollectAsync(store.EnumerateHeadersAsync(folder));
+                Assert.Equal(new[] { "Um", "Dois", "Tres" }, after.Select(h => h.Subject));
+            }
+
+            using var reopened = DbxStore.Open(dir, deletedMessageCacheDatabasePath: deletedCacheDbPath);
+            var afterReopen = await CollectAsync(reopened.EnumerateHeadersAsync(reopened.Folders.Single()));
+            Assert.Equal(new[] { "Um", "Dois", "Tres" }, afterReopen.Select(h => h.Subject));
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            File.Delete(deletedCacheDbPath);
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
     private static byte[] BuildDamagedEmailDbx()
     {
         var builder = new TestDbxBuilder();
