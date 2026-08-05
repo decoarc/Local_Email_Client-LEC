@@ -158,10 +158,13 @@ public partial class MainWindowViewModel : ObservableObject
     /// successfully first.
     /// </summary>
     /// <exception cref="InvalidOperationException">
-    /// Thrown when sourceNode's folder, or any folder in its subtree, is special
-    /// (SpecialFolderKind != None) — checked before any copying starts. For a cross-profile
-    /// move, also propagates whatever CreateFolderAsync/AddMessageAsync throws on the
-    /// destination profile (name collision, 255-item caps, damaged files) — the source is
+    /// For a cross-profile move only (the same-profile branch returns early via
+    /// DbxStore.MoveFolderAsync, which only checks the folder itself): thrown when
+    /// sourceNode's folder, or any folder in its subtree, is special (SpecialFolderKind !=
+    /// None); or when the subtree has two folders sharing a name (case-insensitive), or a
+    /// name that already exists anywhere in destinationProfile — all checked before any
+    /// copying starts. Also propagates whatever CreateFolderAsync/AddMessageAsync throws on
+    /// the destination profile beyond that (255-item caps, damaged files) — the source is
     /// left completely untouched in every one of those cases, though whatever was already
     /// created in the destination before the failure is not rolled back.
     /// </exception>
@@ -177,6 +180,8 @@ public partial class MainWindowViewModel : ObservableObject
         if (sourceNode.Folder.SpecialFolderKind != SpecialFolderKind.None || ContainsSpecial(sourceNode))
             throw new InvalidOperationException("Pastas especiais não podem ser movidas.");
 
+        ValidateNoNameCollisions(sourceNode, destinationProfile);
+
         await CopyFolderSubtreeAsync(sourceProfile, sourceNode, destinationProfile, destinationParentId, ct);
 
         await sourceProfile.DeleteFolderAsync(sourceNode.Folder.Id);
@@ -184,6 +189,44 @@ public partial class MainWindowViewModel : ObservableObject
 
     private static bool ContainsSpecial(FolderNodeViewModel node) =>
         node.Children.Any(c => c.Folder.SpecialFolderKind != SpecialFolderKind.None || ContainsSpecial(c));
+
+    // DbxStore.CreateFolderAsync derives a folder's backing file as its (sanitized) name
+    // flat in the profile directory, with no per-parent nesting, and refuses to create a
+    // file that already exists anywhere in the profile -- not just among siblings. That
+    // pre-existing constraint (out of scope here) means a cross-profile copy must be
+    // rejected upfront whenever the subtree being moved would produce two same-named
+    // folders anywhere in the destination profile; otherwise CreateFolderAsync throws
+    // partway through the copy, after some folders/messages are already sitting in the
+    // destination.
+    private static void ValidateNoNameCollisions(FolderNodeViewModel sourceNode, ProfileViewModel destinationProfile)
+    {
+        var subtreeNames = new List<string>();
+        CollectNames(sourceNode, subtreeNames);
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var name in subtreeNames)
+        {
+            if (!seen.Add(name))
+                throw new InvalidOperationException(
+                    $"A subárvore tem mais de uma pasta chamada \"{name}\" — o perfil de destino não suporta pastas com o mesmo nome em lugares diferentes.");
+        }
+
+        var destinationNames = new HashSet<string>(
+            destinationProfile.Store.Folders.Select(f => f.Name), StringComparer.OrdinalIgnoreCase);
+        foreach (var name in subtreeNames)
+        {
+            if (destinationNames.Contains(name))
+                throw new InvalidOperationException(
+                    $"Já existe uma pasta chamada \"{name}\" no perfil de destino.");
+        }
+    }
+
+    private static void CollectNames(FolderNodeViewModel node, List<string> names)
+    {
+        names.Add(node.DisplayName);
+        foreach (var child in node.Children)
+            CollectNames(child, names);
+    }
 
     // Recreates one folder in destinationProfile (under destinationParentId), copies every
     // non-recovered message from it, then recurses into every child using the newly created

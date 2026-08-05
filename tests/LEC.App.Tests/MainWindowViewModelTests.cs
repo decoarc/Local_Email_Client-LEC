@@ -380,6 +380,7 @@ public class MainWindowViewModelTests
         Assert.Contains(destStore.AddedMessages, m => m.FolderId == dest2026.Id && m.Subject == "Sub");
 
         Assert.Contains(rootFolder.Id, sourceStore.DeletedFolderIds);
+        Assert.Contains(destProfile.FolderTree.RootNodes, n => n.DisplayName == "Notas");
     }
 
     [Fact]
@@ -418,6 +419,53 @@ public class MainWindowViewModelTests
             viewModel.MoveFolderAsync(sourceProfile, sourceProfile.FolderTree.RootNodes.Single(), destProfile, null));
 
         Assert.Empty(destStore.Folders);
+        Assert.Empty(sourceStore.DeletedFolderIds);
+    }
+
+    [Fact]
+    public async Task MoveFolderAsyncAcrossProfilesRejectsWhenTwoDescendantsShareANameInternally()
+    {
+        var rootFolder = new StoreFolder { Id = 1, ParentId = null, Name = "Raiz", IsLoadable = true, HasBackingFile = true };
+        var subA = new StoreFolder { Id = 2, ParentId = 1, Name = "Sub A", IsLoadable = true, HasBackingFile = true };
+        var subB = new StoreFolder { Id = 3, ParentId = 1, Name = "Sub B", IsLoadable = true, HasBackingFile = true };
+        var subA2026 = new StoreFolder { Id = 4, ParentId = 2, Name = "2026", IsLoadable = true, HasBackingFile = true };
+        var subB2026 = new StoreFolder { Id = 5, ParentId = 3, Name = "2026", IsLoadable = true, HasBackingFile = true };
+        var sourceStore = new FakeMailStore(folders: new[] { rootFolder, subA, subB, subA2026, subB2026 });
+        var sourceProfile = new ProfileViewModel("Origem", @"C:\perfis\Origem", sourceStore);
+
+        var destStore = new FakeMailStore(folders: Array.Empty<StoreFolder>());
+        var destProfile = new ProfileViewModel("Destino", @"C:\perfis\Destino", destStore);
+
+        var viewModel = new MainWindowViewModel();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            viewModel.MoveFolderAsync(sourceProfile, sourceProfile.FolderTree.RootNodes.Single(), destProfile, null));
+
+        Assert.Empty(destStore.Folders);
+        Assert.Empty(sourceStore.DeletedFolderIds);
+    }
+
+    [Fact]
+    public async Task MoveFolderAsyncAcrossProfilesRejectsWhenTheDestinationAlreadyHasAFolderWithThatName()
+    {
+        var rootFolder = new StoreFolder { Id = 1, ParentId = null, Name = "Notas", IsLoadable = true, HasBackingFile = true };
+        var childFolder = new StoreFolder { Id = 2, ParentId = 1, Name = "2026", IsLoadable = true, HasBackingFile = true };
+        var sourceStore = new FakeMailStore(folders: new[] { rootFolder, childFolder });
+        var sourceProfile = new ProfileViewModel("Origem", @"C:\perfis\Origem", sourceStore);
+
+        // "2026" already exists in the destination, tucked under an unrelated parent -- the
+        // constraint is profile-wide, not scoped to the chosen destination parent.
+        var existingUnrelated = new StoreFolder { Id = 10, ParentId = null, Name = "Arquivo", IsLoadable = true, HasBackingFile = true };
+        var existingConflict = new StoreFolder { Id = 11, ParentId = 10, Name = "2026", IsLoadable = true, HasBackingFile = true };
+        var destStore = new FakeMailStore(folders: new[] { existingUnrelated, existingConflict });
+        var destProfile = new ProfileViewModel("Destino", @"C:\perfis\Destino", destStore);
+
+        var viewModel = new MainWindowViewModel();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            viewModel.MoveFolderAsync(sourceProfile, sourceProfile.FolderTree.RootNodes.Single(), destProfile, null));
+
+        Assert.Equal(2, destStore.Folders.Count);
         Assert.Empty(sourceStore.DeletedFolderIds);
     }
 
