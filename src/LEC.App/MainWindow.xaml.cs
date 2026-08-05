@@ -526,7 +526,7 @@ public partial class MainWindow : Window
 
     private async Task ConfirmAndDeleteAsync(MessageHeader header)
     {
-        if (_selectedProfile is not { } profile)
+        if (_selectedProfile is not { } sourceProfile)
             return;
 
         var result = MessageBox.Show(this, "Apagar esta mensagem?", "LEC — Apagar mensagem",
@@ -536,13 +536,17 @@ public partial class MainWindow : Window
 
         try
         {
-            await _viewModel.DeleteMessageAsync(profile, header);
+            await _viewModel.DeleteMessageAsync(sourceProfile, header);
 
             // The deleted message is now hidden from the folder currently on screen --
             // reload that folder's list so it disappears, and clear the reading pane in
             // case it was showing the message that just got deleted (same visual reset
             // MoveMessage_Click/CloseProfile_Click already use for "nothing selected").
-            if (_selectedNode is { } node)
+            // Re-read both _selectedProfile/_selectedNode together here, exactly as
+            // MoveMessage_Click does, rather than pairing a pre-await profile with a
+            // post-await node -- the user's selection could in principle have moved on
+            // during the confirmation dialog and the delete call.
+            if (_selectedProfile is { } profile && _selectedNode is { } node)
                 await _viewModel.SelectFolderAsync(profile, node);
 
             NavigateToRenderedMessage(string.Empty);
