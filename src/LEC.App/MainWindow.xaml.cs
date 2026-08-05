@@ -408,26 +408,25 @@ public partial class MainWindow : Window
 
         try
         {
-            var dialog = new MoveFolderDialog(profile, node) { Owner = this };
-            if (dialog.ShowDialog() != true)
+            var dialog = new MoveFolderDialog(_viewModel.OpenProfiles, profile, node) { Owner = this };
+            if (dialog.ShowDialog() != true || dialog.SelectedProfile is not { } destinationProfile)
                 return;
 
             treeView.IsEnabled = false;
             try
             {
-                await profile.MoveFolderAsync(node.Folder.Id, dialog.SelectedFolderId);
+                await _viewModel.MoveFolderAsync(profile, node, destinationProfile, dialog.SelectedFolderId);
             }
             finally
             {
                 treeView.IsEnabled = true;
             }
 
-            // FolderTree.Build (inside profile.MoveFolderAsync) just replaced every node in
-            // this tree -- reset unconditionally rather than replicating
-            // ConfirmAndDeleteFolderAsync's subtree check: moving the folder that happens to
-            // be selected is the single most common reason to open "Mover pasta..." in the
-            // first place, so the check would almost always fire anyway.
-            if (ReferenceEquals(_selectedProfile, profile))
+            // A cross-profile move rebuilds BOTH profiles' FolderTrees (the source's via
+            // DeleteFolderAsync, the destination's via CreateFolderAsync) -- reset unconditionally
+            // whenever the currently displayed profile is either one, not just the source, since
+            // a same-profile move already rebuilds only that one tree either way.
+            if (ReferenceEquals(_selectedProfile, profile) || ReferenceEquals(_selectedProfile, destinationProfile))
             {
                 _selectedNode = null;
                 _selectedTreeView = null;
