@@ -179,6 +179,13 @@ public sealed class DbxStore : IMailStore
     /// (Health != StoreHealth.Ok), since rebuilding it in that state would silently discard
     /// whatever folders this reader couldn't parse. Nothing is removed/rewritten if any of
     /// these fire.
+    /// <para>
+    /// Thrown <em>after</em> the folder has already been permanently removed (Folders.dbx
+    /// already rewritten without it, in-memory state already updated) when one or more of
+    /// its subtree's backing files could not be deleted from disk (e.g. locked by another
+    /// process) — lists which files failed. <see cref="Folders"/> no longer contains the
+    /// folder regardless of this exception.
+    /// </para>
     /// </exception>
     /// <remarks>
     /// Not idempotent: calling this twice for the same id throws on the second call,
@@ -241,6 +248,7 @@ public sealed class DbxStore : IMailStore
                 _recoveredByFolder.Remove(id);
             }
 
+            var failures = new List<string>();
             foreach (string fileName in fileNames)
             {
                 // These caches key on (profilePath, fileName), not FolderId -- without this,
@@ -250,8 +258,26 @@ public sealed class DbxStore : IMailStore
                 _movedMessageCache.ClearFolder(_profileDirectory, fileName);
                 _deletedMessageCache.ClearFolder(_profileDirectory, fileName);
 
-                File.Delete(Path.Combine(_profileDirectory, fileName)); // no-op if it never existed
+                // Best-effort: Folders.dbx has already been rewritten by this point, so the
+                // folder is permanently gone from the tree either way. A file that can't be
+                // deleted (e.g. locked by another process) becomes an orphan on disk instead
+                // of blocking the rest of the subtree's cleanup.
+                foreach (string candidate in new[] { fileName, fileName + ".bak", fileName + ".original" })
+                {
+                    try
+                    {
+                        File.Delete(Path.Combine(_profileDirectory, candidate)); // no-op if it never existed
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        failures.Add($"{candidate} ({ex.Message})");
+                    }
+                }
             }
+
+            if (failures.Count > 0)
+                throw new InvalidOperationException(
+                    $"Pasta apagada, mas não foi possível remover do disco: {string.Join(", ", failures)}.");
         }, ct);
     }
 

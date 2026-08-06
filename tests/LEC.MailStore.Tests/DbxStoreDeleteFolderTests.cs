@@ -295,6 +295,29 @@ public class DbxStoreDeleteFolderTests
     }
 
     [Fact]
+    public async Task DeleteFolderAsyncWhenABackingFileIsLockedStillDeletesTheFolderButThrowsListingIt()
+    {
+        string dir = BuildProfile();
+        var lockingStream = new FileStream(Path.Combine(dir, "NotasQ1.dbx"), FileMode.Open, FileAccess.Read, FileShare.Read);
+        try
+        {
+            using var store = DbxStore.Open(dir);
+
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => store.DeleteFolderAsync(4));
+            Assert.Contains("NotasQ1.dbx", ex.Message);
+
+            // Folders.dbx was already rewritten without folder 4 -- the exception above is
+            // only about the leftover physical file, not about the deletion itself.
+            Assert.DoesNotContain(store.Folders, f => f.Id == 4);
+        }
+        finally
+        {
+            lockingStream.Dispose();
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task DeleteFolderAsyncPurgesTheScavengeMovedAndDeletedMessageCachesForTheDeletedFolder()
     {
         string dir = BuildProfile();
