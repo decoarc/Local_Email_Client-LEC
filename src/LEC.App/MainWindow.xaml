@@ -108,6 +108,7 @@
                               SelectionMode="Extended"
                               SelectionChanged="MessageListView_SelectionChanged"
                               KeyDown="MessageListView_KeyDown"
+                              GridViewColumnHeader.Click="MessageListView_ColumnHeaderClick"
                               VirtualizingPanel.IsVirtualizing="True"
                               VirtualizingPanel.VirtualizationMode="Recycling">
                         <ListView.ItemContainerStyle>
@@ -155,9 +156,17 @@
                                         </DataTemplate>
                                     </GridViewColumn.CellTemplate>
                                 </GridViewColumn>
-                                <GridViewColumn Header="De" DisplayMemberBinding="{Binding SenderName}" Width="200"/>
+                                <GridViewColumn x:Name="SenderColumn" DisplayMemberBinding="{Binding SenderName}" Width="200">
+                                    <GridViewColumn.Header>
+                                        <TextBlock Text="{Binding DataContext.MessageList.SenderColumnHeader, ElementName=MessageListView}"/>
+                                    </GridViewColumn.Header>
+                                </GridViewColumn>
                                 <GridViewColumn Header="Assunto" DisplayMemberBinding="{Binding Subject}" Width="350"/>
-                                <GridViewColumn Header="Data" DisplayMemberBinding="{Binding Date}" Width="140"/>
+                                <GridViewColumn x:Name="DateColumn" DisplayMemberBinding="{Binding Date}" Width="140">
+                                    <GridViewColumn.Header>
+                                        <TextBlock Text="{Binding DataContext.MessageList.DateColumnHeader, ElementName=MessageListView}"/>
+                                    </GridViewColumn.Header>
+                                </GridViewColumn>
                             </GridView>
                         </ListView.View>
                     </ListView>

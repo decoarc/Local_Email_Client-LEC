@@ -593,6 +593,17 @@ public partial class MainWindow : Window
         }
     }
 
+    private void MessageListView_ColumnHeaderClick(object sender, RoutedEventArgs e)
+    {
+        if (e.OriginalSource is not GridViewColumnHeader { Column: not null } header) return;
+        if (_viewModel.MessageList is not { } messageList) return;
+
+        if (header.Column == SenderColumn)
+            messageList.SortBySender();
+        else if (header.Column == DateColumn)
+            messageList.SortByDate();
+    }
+
     // Resolves which messages a context-menu action or the Delete key should act on: the
     // current selection if there is one -- even if the row that triggered the menu isn't
     // part of it, right-clicking off-selection intentionally leaves the existing selection
