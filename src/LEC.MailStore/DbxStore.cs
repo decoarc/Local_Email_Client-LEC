@@ -432,10 +432,7 @@ public sealed class DbxStore : IMailStore
                     .ToList();
             }
 
-            string pristinePath = filePath + ".original";
-            if (!File.Exists(pristinePath))
-                File.Copy(filePath, pristinePath);
-            File.Copy(filePath, filePath + ".bak", overwrite: true);
+            _backupStore.BeforeRewrite(_profileDirectory, fileName);
 
             // EnumerateHeadersAsync caches an open DbxEmailFile (FileStream + memory-mapped
             // section) per folder in _openFolders, released only on Dispose(). If this folder

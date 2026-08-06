@@ -281,21 +281,26 @@ public class DbxStoreAddMessageTests
     public async Task AddMessageAsyncCreatesBackupsOfTheDestinationFile()
     {
         string dir = BuildProfileWithOneEmptyFolder();
+        string backupRoot = Path.Combine(Path.GetTempPath(), $"lec-backups-{Guid.NewGuid():N}");
         try
         {
             byte[] originalBytes = File.ReadAllBytes(Path.Combine(dir, "Destino.dbx"));
-            using var store = DbxStore.Open(dir);
+            using var store = DbxStore.Open(dir, backupRootDirectory: backupRoot);
             int folderId = store.Folders.Single().Id;
 
             await store.AddMessageAsync(folderId, Encoding.UTF8.GetBytes("x"), "S", null, null, null, null);
 
-            Assert.True(File.Exists(Path.Combine(dir, "Destino.dbx.bak")));
-            Assert.True(File.Exists(Path.Combine(dir, "Destino.dbx.original")));
-            Assert.Equal(originalBytes, File.ReadAllBytes(Path.Combine(dir, "Destino.dbx.original")));
+            Assert.NotEmpty(Directory.GetFiles(backupRoot, "Destino.dbx.bak", SearchOption.AllDirectories));
+            string pristinePath = Assert.Single(Directory.GetFiles(backupRoot, "Destino.dbx.original", SearchOption.AllDirectories));
+            Assert.Equal(originalBytes, File.ReadAllBytes(pristinePath));
+            Assert.False(File.Exists(Path.Combine(dir, "Destino.dbx.bak")));
+            Assert.False(File.Exists(Path.Combine(dir, "Destino.dbx.original")));
         }
         finally
         {
             Directory.Delete(dir, recursive: true);
+            if (Directory.Exists(backupRoot))
+                Directory.Delete(backupRoot, recursive: true);
         }
     }
 
