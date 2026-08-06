@@ -74,4 +74,114 @@ public class MessageListViewModelTests
 
         Assert.Equal(new[] { "Novo", "Antigo", "SemData" }, vm.Messages.Select(m => m.Subject));
     }
+
+    [Fact]
+    public async Task SortBySenderOrdersAlphabeticallyAscendingOnFirstClick()
+    {
+        var folder = new StoreFolder { Id = 1, Name = "Caixa de entrada", IsLoadable = true, HasBackingFile = true };
+        var bravo = new MessageHeader { Id = new MessageRef(1, 1), Subject = "B", SenderName = "Bravo" };
+        var alfa = new MessageHeader { Id = new MessageRef(1, 2), Subject = "A", SenderName = "alfa" };
+        var charlie = new MessageHeader { Id = new MessageRef(1, 3), Subject = "C", SenderName = "Charlie" };
+        var store = new FakeMailStore(
+            folders: new[] { folder },
+            headersByFolder: new() { [1] = new() { bravo, alfa, charlie } });
+
+        var vm = new MessageListViewModel(store);
+        await vm.LoadAsync(folder);
+
+        vm.SortBySender();
+
+        Assert.Equal(new[] { "A", "B", "C" }, vm.Messages.Select(m => m.Subject));
+        Assert.Equal("De ▲", vm.SenderColumnHeader);
+        Assert.Equal("Data", vm.DateColumnHeader);
+    }
+
+    [Fact]
+    public async Task SortBySenderTwiceReversesToDescending()
+    {
+        var folder = new StoreFolder { Id = 1, Name = "Caixa de entrada", IsLoadable = true, HasBackingFile = true };
+        var alfa = new MessageHeader { Id = new MessageRef(1, 1), Subject = "A", SenderName = "Alfa" };
+        var bravo = new MessageHeader { Id = new MessageRef(1, 2), Subject = "B", SenderName = "Bravo" };
+        var store = new FakeMailStore(
+            folders: new[] { folder },
+            headersByFolder: new() { [1] = new() { alfa, bravo } });
+
+        var vm = new MessageListViewModel(store);
+        await vm.LoadAsync(folder);
+
+        vm.SortBySender();
+        vm.SortBySender();
+
+        Assert.Equal(new[] { "B", "A" }, vm.Messages.Select(m => m.Subject));
+        Assert.Equal("De ▼", vm.SenderColumnHeader);
+    }
+
+    [Fact]
+    public async Task SortByDateOnceFromDefaultReversesToOldestFirst()
+    {
+        var folder = new StoreFolder { Id = 1, Name = "Caixa de entrada", IsLoadable = true, HasBackingFile = true };
+        var older = new MessageHeader { Id = new MessageRef(1, 1), Subject = "Antigo", Date = new DateTime(2001, 1, 1) };
+        var newer = new MessageHeader { Id = new MessageRef(1, 2), Subject = "Novo", Date = new DateTime(2005, 1, 1) };
+        var store = new FakeMailStore(
+            folders: new[] { folder },
+            headersByFolder: new() { [1] = new() { older, newer } });
+
+        var vm = new MessageListViewModel(store);
+        await vm.LoadAsync(folder); // default: Date descendente (mais recente primeiro)
+
+        vm.SortByDate(); // mesma coluna já ativa -> inverte
+
+        Assert.Equal(new[] { "Antigo", "Novo" }, vm.Messages.Select(m => m.Subject));
+        Assert.Equal("Data ▲", vm.DateColumnHeader);
+        Assert.Equal("De", vm.SenderColumnHeader);
+    }
+
+    [Fact]
+    public async Task SwitchingColumnAlwaysStartsAscendingRegardlessOfPriorDirection()
+    {
+        var folder = new StoreFolder { Id = 1, Name = "Caixa de entrada", IsLoadable = true, HasBackingFile = true };
+        var older = new MessageHeader { Id = new MessageRef(1, 1), Subject = "Antigo", Date = new DateTime(2001, 1, 1), SenderName = "Zeta" };
+        var newer = new MessageHeader { Id = new MessageRef(1, 2), Subject = "Novo", Date = new DateTime(2005, 1, 1), SenderName = "Alfa" };
+        var store = new FakeMailStore(
+            folders: new[] { folder },
+            headersByFolder: new() { [1] = new() { older, newer } });
+
+        var vm = new MessageListViewModel(store);
+        await vm.LoadAsync(folder);
+
+        vm.SortByDate();   // Date -> ascendente (mais antiga primeiro)
+        vm.SortByDate();   // Date -> descendente (mais recente primeiro)
+        vm.SortBySender(); // troca de coluna -> sempre ascendente, mesmo vindo de Date descendente
+
+        Assert.Equal(new[] { "Novo", "Antigo" }, vm.Messages.Select(m => m.Subject)); // Alfa, Zeta
+        Assert.Equal("De ▲", vm.SenderColumnHeader);
+        Assert.Equal("Data", vm.DateColumnHeader);
+    }
+
+    [Fact]
+    public async Task SortChoicePersistsAcrossFolderReload()
+    {
+        var folderA = new StoreFolder { Id = 1, Name = "A", IsLoadable = true, HasBackingFile = true };
+        var folderB = new StoreFolder { Id = 2, Name = "B", IsLoadable = true, HasBackingFile = true };
+        var store = new FakeMailStore(
+            folders: new[] { folderA, folderB },
+            headersByFolder: new()
+            {
+                [1] = new() { new MessageHeader { Id = new MessageRef(1, 1), Subject = "A1", SenderName = "Bravo" } },
+                [2] = new()
+                {
+                    new MessageHeader { Id = new MessageRef(2, 1), Subject = "B-Bravo", SenderName = "Bravo" },
+                    new MessageHeader { Id = new MessageRef(2, 2), Subject = "B-Alfa", SenderName = "Alfa" },
+                },
+            });
+
+        var vm = new MessageListViewModel(store);
+        await vm.LoadAsync(folderA);
+        vm.SortBySender();
+
+        await vm.LoadAsync(folderB);
+
+        Assert.Equal(new[] { "B-Alfa", "B-Bravo" }, vm.Messages.Select(m => m.Subject));
+        Assert.Equal("De ▲", vm.SenderColumnHeader);
+    }
 }
