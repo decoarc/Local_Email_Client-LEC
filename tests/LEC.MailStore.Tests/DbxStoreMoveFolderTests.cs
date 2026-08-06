@@ -217,17 +217,21 @@ public class DbxStoreMoveFolderTests
     public async Task MoveFolderAsyncUpdatesTheBackupFile()
     {
         string dir = BuildProfile();
+        string backupRoot = Path.Combine(Path.GetTempPath(), $"lec-backups-{Guid.NewGuid():N}");
         try
         {
-            using var store = DbxStore.Open(dir);
+            using var store = DbxStore.Open(dir, backupRootDirectory: backupRoot);
 
             await store.MoveFolderAsync(4, newParentId: null);
 
-            Assert.True(File.Exists(Path.Combine(dir, "Folders.dbx.bak")));
+            Assert.NotEmpty(Directory.GetFiles(backupRoot, "Folders.dbx.bak", SearchOption.AllDirectories));
+            Assert.False(File.Exists(Path.Combine(dir, "Folders.dbx.bak")));
         }
         finally
         {
             Directory.Delete(dir, recursive: true);
+            if (Directory.Exists(backupRoot))
+                Directory.Delete(backupRoot, recursive: true);
         }
     }
 

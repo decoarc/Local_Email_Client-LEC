@@ -368,10 +368,7 @@ public sealed class DbxStore : IMailStore
                     .ToList();
             }
 
-            string pristinePath = foldersDbxPath + ".original";
-            if (!File.Exists(pristinePath))
-                File.Copy(foldersDbxPath, pristinePath);
-            File.Copy(foldersDbxPath, foldersDbxPath + ".bak", overwrite: true);
+            _backupStore.BeforeRewrite(_profileDirectory, "Folders.dbx");
 
             DbxFolderFileWriter.Rebuild(foldersDbxPath, entries);
 
