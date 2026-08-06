@@ -96,6 +96,27 @@ public class ProfileViewModelTests
     }
 
     [Fact]
+    public async Task DeleteFolderAsyncRebuildsTheTreeEvenWhenTheStoreThrowsAfterAlreadyDeleting()
+    {
+        var root = new StoreFolder { Id = 1, Name = "Raiz", IsLoadable = true, HasBackingFile = true };
+        var child = new StoreFolder { Id = 2, ParentId = 1, Name = "Filha", IsLoadable = true, HasBackingFile = true };
+        var store = new FakeMailStore(folders: new[] { root, child })
+        {
+            ExceptionToThrowAfterDeletingFolder = new InvalidOperationException(
+                "Pasta apagada, mas não foi possível remover do disco: Filha.dbx (em uso por outro processo)."),
+        };
+        var profile = new ProfileViewModel("BCP", @"C:\perfis\BCP", store);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => profile.DeleteFolderAsync(child.Id));
+        Assert.Contains("Filha.dbx", ex.Message);
+
+        // The store already removed the folder before throwing -- FolderTree must reflect
+        // that even though the call surfaced as a failure to the caller.
+        var rootNode = Assert.Single(profile.FolderTree.RootNodes);
+        Assert.Empty(rootNode.Children);
+    }
+
+    [Fact]
     public async Task MoveFolderAsyncUpdatesTheTreeUnderTheNewParent()
     {
         var rootA = new StoreFolder { Id = 1, Name = "A", IsLoadable = true, HasBackingFile = true };

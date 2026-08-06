@@ -125,6 +125,12 @@ internal sealed class FakeMailStore : IMailStore
     }
 
     public Exception? ExceptionToThrowOnDeleteFolder { get; set; }
+    // Distinct from ExceptionToThrowOnDeleteFolder above: this one simulates DbxStore's
+    // partial-failure case (Task 3 of the "apagar pasta permanente" plan) -- the folder is
+    // removed from _folders FIRST, then the exception is thrown, so callers that only
+    // handle "nothing happened" exceptions can be tested against "already happened, but
+    // still failed" too.
+    public Exception? ExceptionToThrowAfterDeletingFolder { get; set; }
     public List<int> DeletedFolderIds { get; } = new();
 
     public Task DeleteFolderAsync(int folderId, CancellationToken ct = default)
@@ -134,6 +140,10 @@ internal sealed class FakeMailStore : IMailStore
 
         DeletedFolderIds.Add(folderId);
         _folders.RemoveAll(f => f.Id == folderId);
+
+        if (ExceptionToThrowAfterDeletingFolder is { } afterEx)
+            throw afterEx;
+
         return Task.CompletedTask;
     }
 

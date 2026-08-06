@@ -31,8 +31,17 @@ public sealed class ProfileViewModel
 
     public async Task DeleteFolderAsync(int folderId)
     {
-        await Store.DeleteFolderAsync(folderId);
-        FolderTree.Build(Store.Folders);
+        // DbxStore.DeleteFolderAsync can throw AFTER already deleting the folder for real
+        // (a backing file that couldn't be removed from disk) -- the tree must reflect that
+        // even when the call ends in an exception, not only on the success path.
+        try
+        {
+            await Store.DeleteFolderAsync(folderId);
+        }
+        finally
+        {
+            FolderTree.Build(Store.Folders);
+        }
     }
 
     public async Task MoveFolderAsync(int folderId, int? newParentId)
