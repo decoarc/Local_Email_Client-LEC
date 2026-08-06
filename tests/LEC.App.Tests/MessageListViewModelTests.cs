@@ -82,16 +82,20 @@ public class MessageListViewModelTests
         var bravo = new MessageHeader { Id = new MessageRef(1, 1), Subject = "B", SenderName = "Bravo" };
         var alfa = new MessageHeader { Id = new MessageRef(1, 2), Subject = "A", SenderName = "alfa" };
         var charlie = new MessageHeader { Id = new MessageRef(1, 3), Subject = "C", SenderName = "Charlie" };
+        var noSender = new MessageHeader { Id = new MessageRef(1, 4), Subject = "D", SenderName = null };
         var store = new FakeMailStore(
             folders: new[] { folder },
-            headersByFolder: new() { [1] = new() { bravo, alfa, charlie } });
+            headersByFolder: new() { [1] = new() { bravo, alfa, charlie, noSender } });
 
         var vm = new MessageListViewModel(store);
         await vm.LoadAsync(folder);
 
         vm.SortBySender();
 
-        Assert.Equal(new[] { "A", "B", "C" }, vm.Messages.Select(m => m.Subject));
+        // Null SenderName is compared as string.Empty, which sorts before any non-empty
+        // name in ascending (culture-insensitive) order -- so the null-sender message ("D")
+        // lands first.
+        Assert.Equal(new[] { "D", "A", "B", "C" }, vm.Messages.Select(m => m.Subject));
         Assert.Equal("De ▲", vm.SenderColumnHeader);
         Assert.Equal("Data", vm.DateColumnHeader);
     }

@@ -158,13 +158,13 @@
                                 </GridViewColumn>
                                 <GridViewColumn x:Name="SenderColumn" DisplayMemberBinding="{Binding SenderName}" Width="200">
                                     <GridViewColumn.Header>
-                                        <TextBlock Text="{Binding DataContext.MessageList.SenderColumnHeader, ElementName=MessageListView}"/>
+                                        <TextBlock Text="{Binding DataContext.MessageList.SenderColumnHeader, ElementName=MessageListView, FallbackValue=De}"/>
                                     </GridViewColumn.Header>
                                 </GridViewColumn>
                                 <GridViewColumn Header="Assunto" DisplayMemberBinding="{Binding Subject}" Width="350"/>
                                 <GridViewColumn x:Name="DateColumn" DisplayMemberBinding="{Binding Date}" Width="140">
                                     <GridViewColumn.Header>
-                                        <TextBlock Text="{Binding DataContext.MessageList.DateColumnHeader, ElementName=MessageListView}"/>
+                                        <TextBlock Text="{Binding DataContext.MessageList.DateColumnHeader, ElementName=MessageListView, FallbackValue=Data}"/>
                                     </GridViewColumn.Header>
                                 </GridViewColumn>
                             </GridView>

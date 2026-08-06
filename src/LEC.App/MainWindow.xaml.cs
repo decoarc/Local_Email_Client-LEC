@@ -596,12 +596,23 @@ public partial class MainWindow : Window
     private void MessageListView_ColumnHeaderClick(object sender, RoutedEventArgs e)
     {
         if (e.OriginalSource is not GridViewColumnHeader { Column: not null } header) return;
-        if (_viewModel.MessageList is not { } messageList) return;
+        if (_viewModel.MessageList is not { } messageList) return; // no profile open
+
+        if (header.Column != SenderColumn && header.Column != DateColumn) return;
+
+        // ApplySortColumn (in MessageListViewModel) does Messages.Clear() then re-adds in the
+        // new order; Clear() raises a CollectionChanged Reset which drops SelectedItems and
+        // blanks the reading pane via MessageListView_SelectionChanged. Capture the selection
+        // here and restore it after the sort so the reorder is transparent to the user.
+        var selected = MessageListView.SelectedItems.Cast<MessageHeader>().ToList();
 
         if (header.Column == SenderColumn)
             messageList.SortBySender();
-        else if (header.Column == DateColumn)
+        else
             messageList.SortByDate();
+
+        foreach (var h in selected)
+            MessageListView.SelectedItems.Add(h);
     }
 
     // Resolves which messages a context-menu action or the Delete key should act on: the
