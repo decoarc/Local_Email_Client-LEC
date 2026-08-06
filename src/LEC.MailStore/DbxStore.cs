@@ -167,22 +167,22 @@ public sealed class DbxStore : IMailStore
     }
 
     /// <summary>
-    /// Hides a folder — and every folder in its subtree — from Folders, without touching
-    /// Folders.dbx or any message .dbx. The folder's own backing file (and every
-    /// descendant's) stays on disk untouched; only Folders/_backingFileNames and
-    /// HiddenFolderCache change.
+    /// Permanently deletes a folder — and every folder in its subtree — removing their
+    /// entries from Folders.dbx (a from-scratch rewrite, same pattern as MoveFolderAsync)
+    /// and deleting each folder's own backing .dbx file from disk.
     /// </summary>
     /// <exception cref="InvalidOperationException">
-    /// Thrown when: <paramref name="folderId"/> does not match any existing (visible)
-    /// folder; or the folder, or any folder in its subtree, is a special folder
-    /// (SpecialFolderKind != None) — special folders can never be deleted, including as a
-    /// side effect of deleting an ancestor. Nothing is marked/removed if this is thrown —
-    /// the whole subtree is validated before any of it is hidden.
+    /// Thrown before any mutation when: <paramref name="folderId"/> does not match any
+    /// existing (visible) folder; the folder, or any folder in its subtree, is a special
+    /// folder (SpecialFolderKind != None) — special folders can never be deleted, including
+    /// as a side effect of deleting an ancestor; or Folders.dbx on disk is damaged
+    /// (Health != StoreHealth.Ok), since rebuilding it in that state would silently discard
+    /// whatever folders this reader couldn't parse. Nothing is removed/rewritten if any of
+    /// these fire.
     /// </exception>
     /// <remarks>
     /// Not idempotent: calling this twice for the same id throws on the second call,
-    /// because the first call already removed it from _folders (see Global Constraints in
-    /// the implementation plan for why this differs from DeleteMessageAsync).
+    /// because the first call already removed it from _folders.
     /// Not thread-safe, same as every other mutating DbxStore member.
     /// </remarks>
     public Task DeleteFolderAsync(int folderId, CancellationToken ct = default)
@@ -197,9 +197,37 @@ public sealed class DbxStore : IMailStore
             if (subtreeIds.Any(id => _folders.Single(f => f.Id == id).SpecialFolderKind != SpecialFolderKind.None))
                 throw new InvalidOperationException("Pastas especiais não podem ser apagadas.");
 
+            string foldersDbxPath = Path.Combine(_profileDirectory, "Folders.dbx");
+
+            List<DbxFolderWriteEntry> entries;
+            using (var current = DbxFolderFile.Open(foldersDbxPath))
+            {
+                if (current.Health != StoreHealth.Ok)
+                    throw new InvalidOperationException(
+                        "Folders.dbx está danificado; apagar uma pasta reescreveria o arquivo e descartaria as pastas ilegíveis.");
+
+                entries = current.Folders
+                    .Where(f => !subtreeIds.Contains(f.FolderId))
+                    .Select(f => new DbxFolderWriteEntry(f.FolderId, f.ParentId, f.Name ?? "", f.FileName,
+                        f.Flags, f.MessageCount, f.SpecialFolderType))
+                    .ToList();
+            }
+
+            string pristinePath = foldersDbxPath + ".original";
+            if (!File.Exists(pristinePath))
+                File.Copy(foldersDbxPath, pristinePath);
+            File.Copy(foldersDbxPath, foldersDbxPath + ".bak", overwrite: true);
+
+            DbxFolderFileWriter.Rebuild(foldersDbxPath, entries);
+            // The folder is permanently gone from Folders.dbx from this point on -- every
+            // step below is best-effort disk/cache cleanup around that already-final change.
+
+            var fileNames = new List<string>();
             foreach (int id in subtreeIds)
             {
-                _hiddenFolderCache.MarkHidden(_profileDirectory, id);
+                if (_backingFileNames.TryGetValue(id, out string? fileName) && fileName is not null)
+                    fileNames.Add(fileName);
+
                 _folders.RemoveAll(f => f.Id == id);
                 _backingFileNames.Remove(id);
 
@@ -212,6 +240,9 @@ public sealed class DbxStore : IMailStore
                 _recoveredItemsByFolder.Remove(id);
                 _recoveredByFolder.Remove(id);
             }
+
+            foreach (string fileName in fileNames)
+                File.Delete(Path.Combine(_profileDirectory, fileName)); // no-op if it never existed
         }, ct);
     }
 

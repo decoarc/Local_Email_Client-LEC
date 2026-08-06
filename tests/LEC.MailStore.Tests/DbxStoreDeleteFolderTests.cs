@@ -83,7 +83,7 @@ public class DbxStoreDeleteFolderTests
     }
 
     [Fact]
-    public async Task DeleteFolderAsyncOnALeafFolderHidesOnlyThatFolder()
+    public async Task DeleteFolderAsyncOnALeafFolderDeletesOnlyThatFolder()
     {
         string dir = BuildProfile();
         try
@@ -95,6 +95,8 @@ public class DbxStoreDeleteFolderTests
             Assert.DoesNotContain(store.Folders, f => f.Id == 4);
             Assert.Contains(store.Folders, f => f.Id == 3);
             Assert.Contains(store.Folders, f => f.Id == 2);
+            Assert.False(File.Exists(Path.Combine(dir, "NotasQ1.dbx")));
+            Assert.True(File.Exists(Path.Combine(dir, "Notas2026.dbx")));
         }
         finally
         {
@@ -103,19 +105,24 @@ public class DbxStoreDeleteFolderTests
     }
 
     [Fact]
-    public async Task DeleteFolderAsyncHidesTheWholeSubtreeAtOnce()
+    public async Task DeleteFolderAsyncDeletesTheWholeSubtreeAtOnce()
     {
         string dir = BuildProfile();
         try
         {
             using var store = DbxStore.Open(dir);
 
-            await store.DeleteFolderAsync(2); // Notas -> also hides 3 (child) and 4 (grandchild)
+            await store.DeleteFolderAsync(2); // Notas -> also deletes 3 (child) and 4 (grandchild)
 
             Assert.DoesNotContain(store.Folders, f => f.Id == 2);
             Assert.DoesNotContain(store.Folders, f => f.Id == 3);
             Assert.DoesNotContain(store.Folders, f => f.Id == 4);
             Assert.Contains(store.Folders, f => f.Id == 1); // Inbox untouched
+
+            Assert.False(File.Exists(Path.Combine(dir, "Notas.dbx")));
+            Assert.False(File.Exists(Path.Combine(dir, "Notas2026.dbx")));
+            Assert.False(File.Exists(Path.Combine(dir, "NotasQ1.dbx")));
+            Assert.True(File.Exists(Path.Combine(dir, "Inbox.dbx")));
         }
         finally
         {
@@ -134,6 +141,8 @@ public class DbxStoreDeleteFolderTests
             var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => store.DeleteFolderAsync(1));
             Assert.Contains("especia", ex.Message, StringComparison.OrdinalIgnoreCase);
             Assert.Contains(store.Folders, f => f.Id == 1);
+            Assert.True(File.Exists(Path.Combine(dir, "Inbox.dbx")));
+            Assert.False(File.Exists(Path.Combine(dir, "Folders.dbx.bak")));
         }
         finally
         {
@@ -142,7 +151,7 @@ public class DbxStoreDeleteFolderTests
     }
 
     [Fact]
-    public async Task DeleteFolderAsyncWhoseSubtreeContainsASpecialFolderThrowsAndHidesNothing()
+    public async Task DeleteFolderAsyncWhoseSubtreeContainsASpecialFolderThrowsAndDeletesNothing()
     {
         string dir = BuildProfile();
         try
@@ -153,6 +162,8 @@ public class DbxStoreDeleteFolderTests
             Assert.Contains("especia", ex.Message, StringComparison.OrdinalIgnoreCase);
             Assert.Contains(store.Folders, f => f.Id == 10);
             Assert.Contains(store.Folders, f => f.Id == 11);
+            Assert.True(File.Exists(Path.Combine(dir, "EspecialInbox.dbx")));
+            Assert.False(File.Exists(Path.Combine(dir, "Folders.dbx.bak")));
         }
         finally
         {
@@ -197,32 +208,26 @@ public class DbxStoreDeleteFolderTests
     public async Task DeleteFolderAsyncPersistsAcrossReopen()
     {
         string dir = BuildProfile();
-        string hiddenCacheDbPath = Path.Combine(Path.GetTempPath(), $"lec-hidden-folder-{Guid.NewGuid():N}.db");
         try
         {
-            using (var store = DbxStore.Open(dir, hiddenFolderCacheDatabasePath: hiddenCacheDbPath))
+            using (var store = DbxStore.Open(dir))
                 await store.DeleteFolderAsync(2);
 
-            using var reopened = DbxStore.Open(dir, hiddenFolderCacheDatabasePath: hiddenCacheDbPath);
+            using var reopened = DbxStore.Open(dir);
             Assert.DoesNotContain(reopened.Folders, f => f.Id == 2);
             Assert.DoesNotContain(reopened.Folders, f => f.Id == 3);
             Assert.DoesNotContain(reopened.Folders, f => f.Id == 4);
             Assert.Contains(reopened.Folders, f => f.Id == 1);
+            Assert.False(File.Exists(Path.Combine(dir, "Notas.dbx")));
         }
         finally
         {
-            // Microsoft.Data.Sqlite keeps pooled native connections open past Dispose() for
-            // fast reopen with the same connection string -- that pooled handle still holds
-            // an OS-level lock on the file, so it must be cleared before deleting the temp
-            // db, or File.Delete intermittently throws IOException ("used by another process").
-            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
             Directory.Delete(dir, recursive: true);
-            File.Delete(hiddenCacheDbPath);
         }
     }
 
     [Fact]
-    public async Task DeleteFolderAsyncNeverTouchesFoldersDbxOnDisk()
+    public async Task DeleteFolderAsyncRewritesFoldersDbxAndCreatesBackups()
     {
         string dir = BuildProfile();
         try
@@ -232,8 +237,55 @@ public class DbxStoreDeleteFolderTests
 
             await store.DeleteFolderAsync(4);
 
+            Assert.NotEqual(originalBytes, File.ReadAllBytes(Path.Combine(dir, "Folders.dbx")));
+            Assert.True(File.Exists(Path.Combine(dir, "Folders.dbx.bak")));
+            Assert.True(File.Exists(Path.Combine(dir, "Folders.dbx.original")));
+            Assert.Equal(originalBytes, File.ReadAllBytes(Path.Combine(dir, "Folders.dbx.original")));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task DeleteFolderAsyncWhenFoldersDbxIsDamagedThrowsAndDeletesNothing()
+    {
+        // Same header/tree item-count mismatch trick as
+        // DbxStoreCreateFolderTests.CreateFolderAsyncWhenFoldersDbxIsDamagedThrowsAndLeavesEverythingUntouched
+        // (claims 5 entries, the index tree only yields 1) -- DbxStore.Open only reads Health
+        // once at open time, so this makes sure DeleteFolderAsync's own fresh
+        // DbxFolderFile.Open call -- not just DbxStore.Open -- is what gets checked.
+        var folders = new TestDbxBuilder();
+        folders.WriteHeader(DbxFileType.Folder);
+        int root = folders.WriteInfoNode(new[]
+        {
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxFolderFieldId.FolderId, Direct = true, DirectValue = 1 },
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxFolderFieldId.Name, Data = "Notas\0"u8.ToArray() },
+            new TestDbxBuilder.AttributeSpec { FieldId = (byte)DbxFolderFieldId.FileName, Data = "Notas.dbx\0"u8.ToArray() },
+        });
+        int rootIndexOffset = folders.WriteIndexNode(nextTable: 0, ptrCount: 1, indexCount: 0,
+            entries: new[] { (indexPtr: root, entryNextTable: 0, entryIndexCount: 0) });
+        folders.SetInt32At(LEC.DbxFormat.DbxFormat.HeaderItemCountOffset, 5); // claims 5, tree only yields 1
+        folders.SetInt32At(LEC.DbxFormat.DbxFormat.HeaderIndexPointerOffset, rootIndexOffset);
+
+        string dir = TestProfileBuilder.WriteProfile(("Folders.dbx", folders));
+        var empty = new TestDbxBuilder();
+        empty.WriteHeader(DbxFileType.Email);
+        empty.SetInt32At(LEC.DbxFormat.DbxFormat.HeaderItemCountOffset, 0);
+        File.WriteAllBytes(Path.Combine(dir, "Notas.dbx"), empty.ToArray());
+        try
+        {
+            byte[] originalBytes = File.ReadAllBytes(Path.Combine(dir, "Folders.dbx"));
+            using var store = DbxStore.Open(dir);
+
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => store.DeleteFolderAsync(1));
+            Assert.Contains("danificado", ex.Message, StringComparison.OrdinalIgnoreCase);
+
             Assert.Equal(originalBytes, File.ReadAllBytes(Path.Combine(dir, "Folders.dbx")));
+            Assert.True(File.Exists(Path.Combine(dir, "Notas.dbx")));
             Assert.False(File.Exists(Path.Combine(dir, "Folders.dbx.bak")));
+            Assert.False(File.Exists(Path.Combine(dir, "Folders.dbx.original")));
         }
         finally
         {
