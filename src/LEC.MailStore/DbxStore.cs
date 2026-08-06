@@ -29,7 +29,9 @@ public sealed class DbxStore : IMailStore
 
     private readonly HiddenFolderCache _hiddenFolderCache;
 
-    private DbxStore(string profileDirectory, List<StoreFolder> folders, Dictionary<int, string?> backingFileNames, StoreHealth health, ScavengeCache scavengeCache, MovedMessageCache movedMessageCache, DeletedMessageCache deletedMessageCache, HiddenFolderCache hiddenFolderCache)
+    private readonly FileBackupStore _backupStore;
+
+    private DbxStore(string profileDirectory, List<StoreFolder> folders, Dictionary<int, string?> backingFileNames, StoreHealth health, ScavengeCache scavengeCache, MovedMessageCache movedMessageCache, DeletedMessageCache deletedMessageCache, HiddenFolderCache hiddenFolderCache, FileBackupStore backupStore)
     {
         _profileDirectory = profileDirectory;
         _folders = folders;
@@ -39,6 +41,7 @@ public sealed class DbxStore : IMailStore
         _movedMessageCache = movedMessageCache;
         _deletedMessageCache = deletedMessageCache;
         _hiddenFolderCache = hiddenFolderCache;
+        _backupStore = backupStore;
     }
 
     private static readonly char[] InvalidFileNameChars = { '\\', '/', ':', '*', '?', '"', '<', '>', '|' };
@@ -121,14 +124,7 @@ public sealed class DbxStore : IMailStore
             DbxEmailFileWriter.CreateEmpty(filePath);
             try
             {
-                // Write-once permanent copy of the very first, pristine, real
-                // Outlook-Express-authored Folders.dbx — never overwritten again, so it
-                // survives even after many later folder creations roll the ".bak" copy.
-                string pristinePath = foldersDbxPath + ".original";
-                if (!File.Exists(pristinePath))
-                    File.Copy(foldersDbxPath, pristinePath);
-
-                File.Copy(foldersDbxPath, foldersDbxPath + ".bak", overwrite: true);
+                _backupStore.BeforeRewrite(_profileDirectory, "Folders.dbx");
 
                 entries.Add(new DbxFolderWriteEntry(newId, parentId ?? -1, sanitizedName, fileName));
                 DbxFolderFileWriter.Rebuild(foldersDbxPath, entries);
@@ -483,7 +479,7 @@ public sealed class DbxStore : IMailStore
         }, ct);
     }
 
-    public static DbxStore Open(string profileDirectoryPath, string? scavengeCacheDatabasePath = null, string? movedMessageCacheDatabasePath = null, string? deletedMessageCacheDatabasePath = null, string? hiddenFolderCacheDatabasePath = null)
+    public static DbxStore Open(string profileDirectoryPath, string? scavengeCacheDatabasePath = null, string? movedMessageCacheDatabasePath = null, string? deletedMessageCacheDatabasePath = null, string? hiddenFolderCacheDatabasePath = null, string? backupRootDirectory = null)
     {
         string foldersDbxPath = Path.Combine(profileDirectoryPath, "Folders.dbx");
         using var folderFile = DbxFolderFile.Open(foldersDbxPath);
@@ -517,6 +513,7 @@ public sealed class DbxStore : IMailStore
         var movedMessageCache = OpenMovedMessageCacheWithFallback(movedMessageCacheDatabasePath ?? MovedMessageCache.DefaultDatabasePath);
         var deletedMessageCache = OpenDeletedMessageCacheWithFallback(deletedMessageCacheDatabasePath ?? DeletedMessageCache.DefaultDatabasePath);
         var hiddenFolderCache = OpenHiddenFolderCacheWithFallback(hiddenFolderCacheDatabasePath ?? HiddenFolderCache.DefaultDatabasePath);
+        var backupStore = new FileBackupStore(backupRootDirectory ?? FileBackupStore.DefaultRoot);
 
         // Folders hidden by an old app version's DeleteFolderAsync (hide-only; today's
         // DeleteFolderAsync never writes to this cache — it permanently deletes instead) must
@@ -531,7 +528,7 @@ public sealed class DbxStore : IMailStore
                 backingFileNames.Remove(id);
         }
 
-        return new DbxStore(profileDirectoryPath, folders, backingFileNames, health, scavengeCache, movedMessageCache, deletedMessageCache, hiddenFolderCache);
+        return new DbxStore(profileDirectoryPath, folders, backingFileNames, health, scavengeCache, movedMessageCache, deletedMessageCache, hiddenFolderCache, backupStore);
     }
 
     // Global Constraint (design §8): cache unavailable (AppData not writable, disk full,

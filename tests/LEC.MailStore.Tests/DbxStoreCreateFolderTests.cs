@@ -71,20 +71,23 @@ public class DbxStoreCreateFolderTests
     public async Task CreateFolderAsyncCreatesABackupOfFoldersDbx()
     {
         string dir = BuildProfileWithOneFolder();
+        string backupRoot = Path.Combine(Path.GetTempPath(), $"lec-backups-{Guid.NewGuid():N}");
         try
         {
             byte[] originalBytes = File.ReadAllBytes(Path.Combine(dir, "Folders.dbx"));
-            using var store = DbxStore.Open(dir);
+            using var store = DbxStore.Open(dir, backupRootDirectory: backupRoot);
 
             await store.CreateFolderAsync("Mail 2026", parentId: null);
 
-            string backupPath = Path.Combine(dir, "Folders.dbx.bak");
-            Assert.True(File.Exists(backupPath));
+            string backupPath = Assert.Single(Directory.GetFiles(backupRoot, "Folders.dbx.bak", SearchOption.AllDirectories));
             Assert.Equal(originalBytes, File.ReadAllBytes(backupPath));
+            Assert.False(File.Exists(Path.Combine(dir, "Folders.dbx.bak")));
         }
         finally
         {
             Directory.Delete(dir, recursive: true);
+            if (Directory.Exists(backupRoot))
+                Directory.Delete(backupRoot, recursive: true);
         }
     }
 
@@ -243,10 +246,11 @@ public class DbxStoreCreateFolderTests
         folders.SetInt32At(LEC.DbxFormat.DbxFormat.HeaderIndexPointerOffset, rootIndexOffset);
 
         string dir = TestProfileBuilder.WriteProfile(("Folders.dbx", folders));
+        string backupRoot = Path.Combine(Path.GetTempPath(), $"lec-backups-{Guid.NewGuid():N}");
         try
         {
             byte[] originalBytes = File.ReadAllBytes(Path.Combine(dir, "Folders.dbx"));
-            using var store = DbxStore.Open(dir);
+            using var store = DbxStore.Open(dir, backupRootDirectory: backupRoot);
 
             var ex = await Assert.ThrowsAsync<InvalidOperationException>(
                 () => store.CreateFolderAsync("Mail 2026", parentId: null));
@@ -255,11 +259,13 @@ public class DbxStoreCreateFolderTests
             Assert.Equal(originalBytes, File.ReadAllBytes(Path.Combine(dir, "Folders.dbx")));
             Assert.False(File.Exists(Path.Combine(dir, "Mail 2026.dbx")));
             Assert.False(File.Exists(Path.Combine(dir, "Folders.dbx.bak")));
-            Assert.False(File.Exists(Path.Combine(dir, "Folders.dbx.original")));
+            Assert.False(Directory.Exists(backupRoot));
         }
         finally
         {
             Directory.Delete(dir, recursive: true);
+            if (Directory.Exists(backupRoot))
+                Directory.Delete(backupRoot, recursive: true);
         }
     }
 
@@ -267,25 +273,28 @@ public class DbxStoreCreateFolderTests
     public async Task CreateFolderAsyncKeepsThePristineBackupAcrossMultipleCreates()
     {
         string dir = BuildProfileWithOneFolder();
+        string backupRoot = Path.Combine(Path.GetTempPath(), $"lec-backups-{Guid.NewGuid():N}");
         try
         {
             byte[] originalBytes = File.ReadAllBytes(Path.Combine(dir, "Folders.dbx"));
-            using var store = DbxStore.Open(dir);
+            using var store = DbxStore.Open(dir, backupRootDirectory: backupRoot);
 
             await store.CreateFolderAsync("Mail 2026", parentId: null);
             await store.CreateFolderAsync("Mail 2027", parentId: null);
 
-            string pristinePath = Path.Combine(dir, "Folders.dbx.original");
-            Assert.True(File.Exists(pristinePath));
+            string pristinePath = Assert.Single(Directory.GetFiles(backupRoot, "Folders.dbx.original", SearchOption.AllDirectories));
             Assert.Equal(originalBytes, File.ReadAllBytes(pristinePath));
 
             // The rolling .bak reflects the state just before the *last* create, so it must
             // no longer match the very first bytes once more than one folder was created.
-            Assert.NotEqual(originalBytes, File.ReadAllBytes(Path.Combine(dir, "Folders.dbx.bak")));
+            string bakPath = Assert.Single(Directory.GetFiles(backupRoot, "Folders.dbx.bak", SearchOption.AllDirectories));
+            Assert.NotEqual(originalBytes, File.ReadAllBytes(bakPath));
         }
         finally
         {
             Directory.Delete(dir, recursive: true);
+            if (Directory.Exists(backupRoot))
+                Directory.Delete(backupRoot, recursive: true);
         }
     }
 }
