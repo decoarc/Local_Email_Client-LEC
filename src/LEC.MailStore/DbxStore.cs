@@ -216,10 +216,7 @@ public sealed class DbxStore : IMailStore
                     .ToList();
             }
 
-            string pristinePath = foldersDbxPath + ".original";
-            if (!File.Exists(pristinePath))
-                File.Copy(foldersDbxPath, pristinePath);
-            File.Copy(foldersDbxPath, foldersDbxPath + ".bak", overwrite: true);
+            _backupStore.BeforeRewrite(_profileDirectory, "Folders.dbx");
 
             DbxFolderFileWriter.Rebuild(foldersDbxPath, entries);
             // The folder is permanently gone from Folders.dbx from this point on -- every
@@ -253,21 +250,21 @@ public sealed class DbxStore : IMailStore
                 _scavengeCache.ClearScan(_profileDirectory, fileName);
                 _movedMessageCache.ClearFolder(_profileDirectory, fileName);
                 _deletedMessageCache.ClearFolder(_profileDirectory, fileName);
+                _backupStore.Delete(_profileDirectory, fileName);
 
                 // Best-effort: Folders.dbx has already been rewritten by this point, so the
                 // folder is permanently gone from the tree either way. A file that can't be
                 // deleted (e.g. locked by another process) becomes an orphan on disk instead
-                // of blocking the rest of the subtree's cleanup.
-                foreach (string candidate in new[] { fileName, fileName + ".bak", fileName + ".original" })
+                // of blocking the rest of the subtree's cleanup. Its .bak/.original live in
+                // FileBackupStore's own directory now, not here, so only the real .dbx is a
+                // candidate for this loop.
+                try
                 {
-                    try
-                    {
-                        File.Delete(Path.Combine(_profileDirectory, candidate)); // no-op if it never existed
-                    }
-                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                    {
-                        failures.Add($"{candidate} ({ex.Message})");
-                    }
+                    File.Delete(Path.Combine(_profileDirectory, fileName)); // no-op if it never existed
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    failures.Add($"{fileName} ({ex.Message})");
                 }
             }
 

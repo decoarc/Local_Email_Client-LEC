@@ -135,19 +135,22 @@ public class DbxStoreDeleteFolderTests
     public async Task DeleteFolderAsyncOnASpecialFolderThrowsAndChangesNothing()
     {
         string dir = BuildProfile();
+        string backupRoot = Path.Combine(Path.GetTempPath(), $"lec-backups-{Guid.NewGuid():N}");
         try
         {
-            using var store = DbxStore.Open(dir);
+            using var store = DbxStore.Open(dir, backupRootDirectory: backupRoot);
 
             var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => store.DeleteFolderAsync(1));
             Assert.Contains("especia", ex.Message, StringComparison.OrdinalIgnoreCase);
             Assert.Contains(store.Folders, f => f.Id == 1);
             Assert.True(File.Exists(Path.Combine(dir, "Inbox.dbx")));
-            Assert.False(File.Exists(Path.Combine(dir, "Folders.dbx.bak")));
+            Assert.False(Directory.Exists(backupRoot));
         }
         finally
         {
             Directory.Delete(dir, recursive: true);
+            if (Directory.Exists(backupRoot))
+                Directory.Delete(backupRoot, recursive: true);
         }
     }
 
@@ -155,20 +158,23 @@ public class DbxStoreDeleteFolderTests
     public async Task DeleteFolderAsyncWhoseSubtreeContainsASpecialFolderThrowsAndDeletesNothing()
     {
         string dir = BuildProfile();
+        string backupRoot = Path.Combine(Path.GetTempPath(), $"lec-backups-{Guid.NewGuid():N}");
         try
         {
-            using var store = DbxStore.Open(dir);
+            using var store = DbxStore.Open(dir, backupRootDirectory: backupRoot);
 
             var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => store.DeleteFolderAsync(10)); // Raiz -> child 11 is special
             Assert.Contains("especia", ex.Message, StringComparison.OrdinalIgnoreCase);
             Assert.Contains(store.Folders, f => f.Id == 10);
             Assert.Contains(store.Folders, f => f.Id == 11);
             Assert.True(File.Exists(Path.Combine(dir, "EspecialInbox.dbx")));
-            Assert.False(File.Exists(Path.Combine(dir, "Folders.dbx.bak")));
+            Assert.False(Directory.Exists(backupRoot));
         }
         finally
         {
             Directory.Delete(dir, recursive: true);
+            if (Directory.Exists(backupRoot))
+                Directory.Delete(backupRoot, recursive: true);
         }
     }
 
@@ -231,21 +237,26 @@ public class DbxStoreDeleteFolderTests
     public async Task DeleteFolderAsyncRewritesFoldersDbxAndCreatesBackups()
     {
         string dir = BuildProfile();
+        string backupRoot = Path.Combine(Path.GetTempPath(), $"lec-backups-{Guid.NewGuid():N}");
         try
         {
             byte[] originalBytes = File.ReadAllBytes(Path.Combine(dir, "Folders.dbx"));
-            using var store = DbxStore.Open(dir);
+            using var store = DbxStore.Open(dir, backupRootDirectory: backupRoot);
 
             await store.DeleteFolderAsync(4);
 
             Assert.NotEqual(originalBytes, File.ReadAllBytes(Path.Combine(dir, "Folders.dbx")));
-            Assert.True(File.Exists(Path.Combine(dir, "Folders.dbx.bak")));
-            Assert.True(File.Exists(Path.Combine(dir, "Folders.dbx.original")));
-            Assert.Equal(originalBytes, File.ReadAllBytes(Path.Combine(dir, "Folders.dbx.original")));
+            Assert.NotEmpty(Directory.GetFiles(backupRoot, "Folders.dbx.bak", SearchOption.AllDirectories));
+            string pristinePath = Assert.Single(Directory.GetFiles(backupRoot, "Folders.dbx.original", SearchOption.AllDirectories));
+            Assert.Equal(originalBytes, File.ReadAllBytes(pristinePath));
+            Assert.False(File.Exists(Path.Combine(dir, "Folders.dbx.bak")));
+            Assert.False(File.Exists(Path.Combine(dir, "Folders.dbx.original")));
         }
         finally
         {
             Directory.Delete(dir, recursive: true);
+            if (Directory.Exists(backupRoot))
+                Directory.Delete(backupRoot, recursive: true);
         }
     }
 
@@ -271,6 +282,7 @@ public class DbxStoreDeleteFolderTests
         folders.SetInt32At(LEC.DbxFormat.DbxFormat.HeaderIndexPointerOffset, rootIndexOffset);
 
         string dir = TestProfileBuilder.WriteProfile(("Folders.dbx", folders));
+        string backupRoot = Path.Combine(Path.GetTempPath(), $"lec-backups-{Guid.NewGuid():N}");
         var empty = new TestDbxBuilder();
         empty.WriteHeader(DbxFileType.Email);
         empty.SetInt32At(LEC.DbxFormat.DbxFormat.HeaderItemCountOffset, 0);
@@ -278,19 +290,20 @@ public class DbxStoreDeleteFolderTests
         try
         {
             byte[] originalBytes = File.ReadAllBytes(Path.Combine(dir, "Folders.dbx"));
-            using var store = DbxStore.Open(dir);
+            using var store = DbxStore.Open(dir, backupRootDirectory: backupRoot);
 
             var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => store.DeleteFolderAsync(1));
             Assert.Contains("danificado", ex.Message, StringComparison.OrdinalIgnoreCase);
 
             Assert.Equal(originalBytes, File.ReadAllBytes(Path.Combine(dir, "Folders.dbx")));
             Assert.True(File.Exists(Path.Combine(dir, "Notas.dbx")));
-            Assert.False(File.Exists(Path.Combine(dir, "Folders.dbx.bak")));
-            Assert.False(File.Exists(Path.Combine(dir, "Folders.dbx.original")));
+            Assert.False(Directory.Exists(backupRoot));
         }
         finally
         {
             Directory.Delete(dir, recursive: true);
+            if (Directory.Exists(backupRoot))
+                Directory.Delete(backupRoot, recursive: true);
         }
     }
 
@@ -323,6 +336,36 @@ public class DbxStoreDeleteFolderTests
         {
             lockingStream.Dispose();
             Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task DeleteFolderAsyncAlsoRemovesTheDeletedFoldersBackupFiles()
+    {
+        string dir = BuildProfile();
+        string backupRoot = Path.Combine(Path.GetTempPath(), $"lec-backups-{Guid.NewGuid():N}");
+        try
+        {
+            using var store = DbxStore.Open(dir, backupRootDirectory: backupRoot);
+
+            // Give folder 4's own file (NotasQ1.dbx) a backup first, so there's something for
+            // DeleteFolderAsync's cleanup to actually remove. AddMessageAsync isn't wired into
+            // FileBackupStore yet (separate task), so seed it directly through the same
+            // FileBackupStore/root DbxStore itself uses -- ProfileBackupDirectory hashes off
+            // `dir`, so this lands in the exact directory DeleteFolderAsync's cleanup reads.
+            new FileBackupStore(backupRoot).BeforeRewrite(dir, "NotasQ1.dbx");
+            Assert.NotEmpty(Directory.GetFiles(backupRoot, "NotasQ1.dbx.bak", SearchOption.AllDirectories));
+
+            await store.DeleteFolderAsync(4);
+
+            Assert.Empty(Directory.GetFiles(backupRoot, "NotasQ1.dbx.bak", SearchOption.AllDirectories));
+            Assert.Empty(Directory.GetFiles(backupRoot, "NotasQ1.dbx.original", SearchOption.AllDirectories));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+            if (Directory.Exists(backupRoot))
+                Directory.Delete(backupRoot, recursive: true);
         }
     }
 
