@@ -217,10 +217,10 @@ public partial class MainWindowViewModel : ObservableObject
     /// <summary>
     /// Moves a folder — same-profile is the existing cheap ParentId retarget
     /// (ProfileViewModel.MoveFolderAsync); cross-profile copies the whole subtree (folders +
-    /// non-recovered messages) into destinationProfile, then hides it in sourceProfile via
-    /// the already-shipped DeleteFolderAsync — never touches sourceProfile's Folders.dbx or
-    /// any message .dbx. Nothing is hidden in the source unless the ENTIRE subtree copied
-    /// successfully first.
+    /// non-recovered messages) into destinationProfile, then permanently deletes it from
+    /// sourceProfile via the already-shipped DeleteFolderAsync — sourceProfile's Folders.dbx
+    /// is rewritten and its backing .dbx files are removed from disk. Nothing is deleted
+    /// from the source unless the ENTIRE subtree copied successfully first.
     /// </summary>
     /// <exception cref="InvalidOperationException">
     /// For a cross-profile move only (the same-profile branch returns early via

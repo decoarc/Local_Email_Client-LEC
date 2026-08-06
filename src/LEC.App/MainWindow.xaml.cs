@@ -345,7 +345,7 @@ public partial class MainWindow : Window
     private async Task ConfirmAndDeleteFolderAsync(ProfileViewModel profile, FolderNodeViewModel node, TreeView treeView)
     {
         var result = MessageBox.Show(this,
-            $"Apagar a pasta \"{node.DisplayName}\" e tudo dentro dela (subpastas e mensagens)?",
+            $"Apagar permanentemente a pasta \"{node.DisplayName}\" e tudo dentro dela (subpastas e mensagens)? Essa ação não pode ser desfeita.",
             "LEC — Apagar pasta", MessageBoxButton.YesNo, MessageBoxImage.Question);
         if (result != MessageBoxResult.Yes)
             return;
@@ -362,17 +362,6 @@ public partial class MainWindow : Window
         try
         {
             await profile.DeleteFolderAsync(node.Folder.Id);
-
-            if (selectionIsInsideDeletedSubtree)
-            {
-                _selectedNode = null;
-                _selectedTreeView = null;
-                ScavengeButton.Visibility = Visibility.Collapsed;
-                RecoverableBar.Visibility = Visibility.Collapsed;
-                NavigateToRenderedMessage(string.Empty);
-                ImagesBlockedBar.Visibility = Visibility.Collapsed;
-                _viewModel.ClearCurrentFolder();
-            }
         }
         catch (Exception ex)
         {
@@ -381,6 +370,21 @@ public partial class MainWindow : Window
         finally
         {
             treeView.IsEnabled = true;
+        }
+
+        // DeleteFolderAsync can now throw AFTER already deleting the folder for real (a
+        // backing file that couldn't be removed from disk) -- checking the store directly,
+        // instead of only reacting to the try block's success, keeps this correct either way.
+        bool folderWasActuallyDeleted = !profile.Store.Folders.Any(f => f.Id == node.Folder.Id);
+        if (selectionIsInsideDeletedSubtree && folderWasActuallyDeleted)
+        {
+            _selectedNode = null;
+            _selectedTreeView = null;
+            ScavengeButton.Visibility = Visibility.Collapsed;
+            RecoverableBar.Visibility = Visibility.Collapsed;
+            NavigateToRenderedMessage(string.Empty);
+            ImagesBlockedBar.Visibility = Visibility.Collapsed;
+            _viewModel.ClearCurrentFolder();
         }
     }
 
