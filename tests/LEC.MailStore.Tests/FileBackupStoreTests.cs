@@ -1,5 +1,4 @@
 // tests/LEC.MailStore.Tests/FileBackupStoreTests.cs
-using LEC.MailStore;
 using Xunit;
 
 namespace LEC.MailStore.Tests;
@@ -186,6 +185,33 @@ public class FileBackupStoreTests
             Directory.Delete(profileDir, recursive: true);
             if (Directory.Exists(backupRoot))
                 Directory.Delete(backupRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void BeforeRewriteThrowsWhenTheBackupRootIsNotWritable()
+    {
+        // Global Constraint #1 (see backups-fora-do-perfil design doc): unlike the SQLite
+        // caches' silent :memory: fallback, a backup failure must propagate and abort the
+        // caller -- never be swallowed. Force that failure deterministically by pointing the
+        // backup root at a path *under* an existing plain file: Directory.CreateDirectory
+        // can never turn a file into a directory, so it reliably throws.
+        string profileDir = Path.Combine(Path.GetTempPath(), $"lec-profile-{Guid.NewGuid():N}");
+        string blockingFile = Path.Combine(Path.GetTempPath(), $"lec-blocker-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(profileDir);
+        File.WriteAllText(blockingFile, "not a directory");
+        try
+        {
+            File.WriteAllText(Path.Combine(profileDir, "Folders.dbx"), "x");
+            // A path *under* an existing plain file can never become a real directory.
+            var store = new FileBackupStore(Path.Combine(blockingFile, "backups"));
+
+            Assert.ThrowsAny<IOException>(() => store.BeforeRewrite(profileDir, "Folders.dbx"));
+        }
+        finally
+        {
+            Directory.Delete(profileDir, recursive: true);
+            File.Delete(blockingFile);
         }
     }
 }

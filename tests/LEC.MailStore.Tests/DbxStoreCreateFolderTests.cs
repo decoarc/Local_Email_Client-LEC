@@ -270,6 +270,36 @@ public class DbxStoreCreateFolderTests
     }
 
     [Fact]
+    public async Task CreateFolderAsyncWhenTheBackupStepFailsThrowsAndLeavesFoldersDbxUntouched()
+    {
+        // Global Constraint #1 (backups-fora-do-perfil design doc): a failure in
+        // FileBackupStore.BeforeRewrite must propagate and abort the calling operation --
+        // deliberately different from the SQLite caches' silent :memory: fallback. Force that
+        // failure deterministically by pointing backupRootDirectory at a path *under* an
+        // existing plain file, so Directory.CreateDirectory inside BeforeRewrite throws.
+        string dir = BuildProfileWithOneFolder();
+        string blockingFile = Path.Combine(Path.GetTempPath(), $"lec-blocker-{Guid.NewGuid():N}");
+        File.WriteAllText(blockingFile, "not a directory");
+        try
+        {
+            byte[] originalBytes = File.ReadAllBytes(Path.Combine(dir, "Folders.dbx"));
+            using var store = DbxStore.Open(dir, backupRootDirectory: Path.Combine(blockingFile, "backups"));
+
+            await Assert.ThrowsAnyAsync<IOException>(
+                () => store.CreateFolderAsync("Mail 2026", parentId: null));
+
+            Assert.Equal(originalBytes, File.ReadAllBytes(Path.Combine(dir, "Folders.dbx")));
+            Assert.False(File.Exists(Path.Combine(dir, "Mail 2026.dbx")));
+            Assert.DoesNotContain(store.Folders, f => f.Name == "Mail 2026");
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+            File.Delete(blockingFile);
+        }
+    }
+
+    [Fact]
     public async Task CreateFolderAsyncKeepsThePristineBackupAcrossMultipleCreates()
     {
         string dir = BuildProfileWithOneFolder();

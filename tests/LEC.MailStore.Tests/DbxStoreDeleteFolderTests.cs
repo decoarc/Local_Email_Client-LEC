@@ -349,11 +349,11 @@ public class DbxStoreDeleteFolderTests
             using var store = DbxStore.Open(dir, backupRootDirectory: backupRoot);
 
             // Give folder 4's own file (NotasQ1.dbx) a backup first, so there's something for
-            // DeleteFolderAsync's cleanup to actually remove. AddMessageAsync isn't wired into
-            // FileBackupStore yet (separate task), so seed it directly through the same
-            // FileBackupStore/root DbxStore itself uses -- ProfileBackupDirectory hashes off
-            // `dir`, so this lands in the exact directory DeleteFolderAsync's cleanup reads.
-            new FileBackupStore(backupRoot).BeforeRewrite(dir, "NotasQ1.dbx");
+            // DeleteFolderAsync's cleanup to actually remove. Seeded through the real
+            // AddMessageAsync production path (not a hand-built FileBackupStore) so this test
+            // also proves the fileName AddMessageAsync backs up under is the same string
+            // DeleteFolderAsync's cleanup deletes.
+            await store.AddMessageAsync(4, "conteudo"u8.ToArray(), "Oi", null, null, null, null);
             Assert.NotEmpty(Directory.GetFiles(backupRoot, "NotasQ1.dbx.bak", SearchOption.AllDirectories));
 
             await store.DeleteFolderAsync(4);
