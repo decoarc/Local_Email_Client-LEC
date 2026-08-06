@@ -242,7 +242,16 @@ public sealed class DbxStore : IMailStore
             }
 
             foreach (string fileName in fileNames)
+            {
+                // These caches key on (profilePath, fileName), not FolderId -- without this,
+                // a future folder that reuses the same sanitized name (same fileName) would
+                // silently inherit this deleted folder's hidden/scavenged offsets.
+                _scavengeCache.ClearScan(_profileDirectory, fileName);
+                _movedMessageCache.ClearFolder(_profileDirectory, fileName);
+                _deletedMessageCache.ClearFolder(_profileDirectory, fileName);
+
                 File.Delete(Path.Combine(_profileDirectory, fileName)); // no-op if it never existed
+            }
         }, ct);
     }
 

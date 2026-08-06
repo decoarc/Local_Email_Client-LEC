@@ -1,5 +1,6 @@
 // tests/LEC.MailStore.Tests/DbxStoreDeleteFolderTests.cs
 using System.Linq;
+using System.Text;
 using LEC.DbxFormat;
 using LEC.DbxFormat.Tests;
 using LEC.MailStore;
@@ -290,6 +291,55 @@ public class DbxStoreDeleteFolderTests
         finally
         {
             Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task DeleteFolderAsyncPurgesTheScavengeMovedAndDeletedMessageCachesForTheDeletedFolder()
+    {
+        string dir = BuildProfile();
+        string scavengeDbPath = Path.Combine(Path.GetTempPath(), $"lec-scavenge-{Guid.NewGuid():N}.db");
+        string movedDbPath = Path.Combine(Path.GetTempPath(), $"lec-moved-{Guid.NewGuid():N}.db");
+        string deletedDbPath = Path.Combine(Path.GetTempPath(), $"lec-deleted-{Guid.NewGuid():N}.db");
+        try
+        {
+            DbxEmailFileWriter.Rebuild(Path.Combine(dir, "Notas.dbx"), new[]
+            {
+                new DbxMessageWriteEntry(Encoding.UTF8.GetBytes("um"), "Um", null, null, null, null),
+                new DbxMessageWriteEntry(Encoding.UTF8.GetBytes("dois"), "Dois", null, null, null, null),
+            });
+
+            using (var store = DbxStore.Open(dir,
+                scavengeCacheDatabasePath: scavengeDbPath,
+                movedMessageCacheDatabasePath: movedDbPath,
+                deletedMessageCacheDatabasePath: deletedDbPath))
+            {
+                var folder = store.Folders.Single(f => f.Id == 2); // Notas
+                var headers = new List<MessageHeader>();
+                await foreach (var h in store.EnumerateHeadersAsync(folder))
+                    headers.Add(h);
+
+                await store.HideMovedMessageAsync(headers.Single(h => h.Subject == "Um").Id);
+                await store.DeleteMessageAsync(headers.Single(h => h.Subject == "Dois").Id);
+                await store.ScavengeAsync(folder);
+
+                await store.DeleteFolderAsync(2);
+            }
+
+            using var scavengeCache = new ScavengeCache(scavengeDbPath);
+            Assert.Null(scavengeCache.GetScan(dir, "Notas.dbx"));
+            using var movedCache = new MovedMessageCache(movedDbPath);
+            Assert.Empty(movedCache.GetMovedOffsets(dir, "Notas.dbx"));
+            using var deletedCache = new DeletedMessageCache(deletedDbPath);
+            Assert.Empty(deletedCache.GetDeletedOffsets(dir, "Notas.dbx"));
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            Directory.Delete(dir, recursive: true);
+            File.Delete(scavengeDbPath);
+            File.Delete(movedDbPath);
+            File.Delete(deletedDbPath);
         }
     }
 }
