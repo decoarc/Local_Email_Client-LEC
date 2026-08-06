@@ -4,17 +4,24 @@ using Microsoft.Data.Sqlite;
 namespace LEC.MailStore;
 
 /// <summary>
-/// Tracks folders "deleted" (hidden from DbxStore.Folders, never removed from Folders.dbx
-/// or any message .dbx — see docs/superpowers/specs/2026-08-05-apagar-mover-pastas-motor-design.md
-/// §3) so DbxStore.Open/DeleteFolderAsync can hide a whole subtree without ever touching a
-/// file on disk. Same pattern as DeletedMessageCache/MovedMessageCache: lightweight SQLite
-/// under %LOCALAPPDATA%\LEC\, never next to the source profile.
+/// Tracks folders hidden from DbxStore.Folders by an old app version's DeleteFolderAsync
+/// (hide-only, never removing anything from Folders.dbx or any message .dbx — see
+/// docs/superpowers/specs/2026-08-05-apagar-mover-pastas-motor-design.md §3), so DbxStore.Open's
+/// read-path can still filter them out today even though DeleteFolderAsync itself no longer
+/// writes here — it permanently removes folders instead (see
+/// docs/superpowers/specs/2026-08-06-apagar-pasta-permanente-design.md). Same pattern as
+/// DeletedMessageCache/MovedMessageCache: lightweight SQLite under %LOCALAPPDATA%\LEC\, never
+/// next to the source profile.
 ///
 /// Unlike those two caches, this one is keyed by folder_id rather than an offset into a
-/// file, and has no ClearFolder/purge method: CreateFolderAsync and MoveFolderAsync always
-/// preserve every existing folder's FolderId when they rewrite Folders.dbx (they only add
-/// or retarget one entry's ParentId), so a FolderId marked hidden here can never later end
-/// up identifying a different folder the way a rebuilt message's index_node_offset can.
+/// file, and has no ClearFolder/purge method: a FolderId marked hidden here can never later
+/// end up identifying a different real folder, because CollectSubtreeIds (in DbxStore.cs)
+/// walks the in-memory folder list, which already excludes hidden folders (filtered out at
+/// Open), so a hidden folder's Folders.dbx entry is never a candidate for removal by
+/// DeleteFolderAsync; and CreateFolderAsync assigns new ids as one past the max id among the
+/// *on-disk* Folders.dbx entries, which still counts hidden ones (hiding never removed their
+/// entry, only filtered it from the in-memory list) — so a fresh id can never collide with a
+/// hidden one either.
 /// </summary>
 public sealed class HiddenFolderCache : IDisposable
 {

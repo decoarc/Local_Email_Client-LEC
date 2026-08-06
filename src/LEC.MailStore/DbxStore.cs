@@ -518,10 +518,11 @@ public sealed class DbxStore : IMailStore
         var deletedMessageCache = OpenDeletedMessageCacheWithFallback(deletedMessageCacheDatabasePath ?? DeletedMessageCache.DefaultDatabasePath);
         var hiddenFolderCache = OpenHiddenFolderCacheWithFallback(hiddenFolderCacheDatabasePath ?? HiddenFolderCache.DefaultDatabasePath);
 
-        // Folders hidden by a previous DeleteFolderAsync call (this session or an earlier
-        // one — the cache is persistent) must never re-enter Folders/backingFileNames: this
-        // is the ONLY place that filter is applied, so every other DbxStore member (and
-        // every LEC.App consumer of Folders) never has to know a hidden folder ever existed.
+        // Folders hidden by an old app version's DeleteFolderAsync (hide-only; today's
+        // DeleteFolderAsync never writes to this cache — it permanently deletes instead) must
+        // never re-enter Folders/backingFileNames: this is the ONLY place that filter is
+        // applied, so every other DbxStore member (and every LEC.App consumer of Folders)
+        // never has to know a hidden folder ever existed.
         var hiddenIds = hiddenFolderCache.GetHiddenFolderIds(profileDirectoryPath);
         if (hiddenIds.Count > 0)
         {

@@ -301,19 +301,74 @@ public class DbxStoreDeleteFolderTests
         var lockingStream = new FileStream(Path.Combine(dir, "NotasQ1.dbx"), FileMode.Open, FileAccess.Read, FileShare.Read);
         try
         {
-            using var store = DbxStore.Open(dir);
+            using (var store = DbxStore.Open(dir))
+            {
+                var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => store.DeleteFolderAsync(4));
+                Assert.Contains("NotasQ1.dbx", ex.Message);
 
-            var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => store.DeleteFolderAsync(4));
-            Assert.Contains("NotasQ1.dbx", ex.Message);
+                // Folders.dbx was already rewritten without folder 4 -- the exception above is
+                // only about the leftover physical file, not about the deletion itself.
+                Assert.DoesNotContain(store.Folders, f => f.Id == 4);
+            }
 
-            // Folders.dbx was already rewritten without folder 4 -- the exception above is
-            // only about the leftover physical file, not about the deletion itself.
-            Assert.DoesNotContain(store.Folders, f => f.Id == 4);
+            // The in-memory assertion above only pins DbxStore's own list -- reopening the
+            // store (same pattern as DeleteFolderAsyncPersistsAcrossReopen) proves the
+            // Folders.dbx rewrite this test exercises the "throws after mutating" path for
+            // actually reached disk, not just the in-memory copy of it.
+            using var reopened = DbxStore.Open(dir);
+            Assert.DoesNotContain(reopened.Folders, f => f.Id == 4);
+            Assert.Contains(reopened.Folders, f => f.Id == 3);
         }
         finally
         {
             lockingStream.Dispose();
             Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void OpenFiltersOutAFolderMarkedHiddenByAnOlderAppVersion()
+    {
+        string dir = BuildProfile();
+        string hiddenDbPath = Path.Combine(Path.GetTempPath(), $"lec-hidden-{Guid.NewGuid():N}.db");
+        try
+        {
+            // Simulates an old app version's hide-only DeleteFolderAsync, without going
+            // through today's DbxStore.DeleteFolderAsync at all (which no longer writes here).
+            using (var cache = new HiddenFolderCache(hiddenDbPath))
+                cache.MarkHidden(dir, 4);
+
+            using var store = DbxStore.Open(dir, hiddenFolderCacheDatabasePath: hiddenDbPath);
+
+            Assert.DoesNotContain(store.Folders, f => f.Id == 4);
+            Assert.Contains(store.Folders, f => f.Id == 3); // untouched sibling still present
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            Directory.Delete(dir, recursive: true);
+            File.Delete(hiddenDbPath);
+        }
+    }
+
+    [Fact]
+    public async Task DeleteFolderAsyncNeverMarksTheDeletedFolderHidden()
+    {
+        string dir = BuildProfile();
+        string hiddenDbPath = Path.Combine(Path.GetTempPath(), $"lec-hidden-{Guid.NewGuid():N}.db");
+        try
+        {
+            using (var store = DbxStore.Open(dir, hiddenFolderCacheDatabasePath: hiddenDbPath))
+                await store.DeleteFolderAsync(4);
+
+            using var cache = new HiddenFolderCache(hiddenDbPath);
+            Assert.Empty(cache.GetHiddenFolderIds(dir));
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            Directory.Delete(dir, recursive: true);
+            File.Delete(hiddenDbPath);
         }
     }
 

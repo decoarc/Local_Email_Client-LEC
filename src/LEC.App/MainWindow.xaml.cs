@@ -358,6 +358,7 @@ public partial class MainWindow : Window
             && _selectedNode is { } current
             && (ReferenceEquals(current, node) || IsDescendantOf(node, current));
 
+        Exception? failure = null;
         treeView.IsEnabled = false;
         try
         {
@@ -365,7 +366,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, "LEC — Não foi possível apagar a pasta", MessageBoxButton.OK, MessageBoxImage.Warning);
+            failure = ex;
         }
         finally
         {
@@ -376,20 +377,44 @@ public partial class MainWindow : Window
         // backing file that couldn't be removed from disk) -- checking the store directly,
         // instead of only reacting to the try block's success, keeps this correct either way.
         bool folderWasActuallyDeleted = !profile.Store.Folders.Any(f => f.Id == node.Folder.Id);
-        if (selectionIsInsideDeletedSubtree && folderWasActuallyDeleted)
+
+        // profile.DeleteFolderAsync rebuilds profile.FolderTree in a `finally` on every call --
+        // even ones where nothing actually changed -- replacing every node with a brand-new
+        // instance. Any node this window cached as "selected" for this profile is therefore
+        // detached from the (rebuilt) tree either way, regardless of whether this particular
+        // delete succeeded, so it must be reset unconditionally here (same discipline
+        // CreateFolderAsync already applies after its own tree rebuild).
+        if (ReferenceEquals(_selectedProfile, profile))
         {
             _selectedNode = null;
             _selectedTreeView = null;
+        }
+
+        // The rest of the "active reading context was destroyed" cleanup stays narrowly
+        // scoped to deletes that actually removed something the user was looking at.
+        if (selectionIsInsideDeletedSubtree && folderWasActuallyDeleted)
+        {
             ScavengeButton.Visibility = Visibility.Collapsed;
             RecoverableBar.Visibility = Visibility.Collapsed;
             NavigateToRenderedMessage(string.Empty);
             ImagesBlockedBar.Visibility = Visibility.Collapsed;
             _viewModel.ClearCurrentFolder();
         }
+
+        if (failure is not null)
+        {
+            // Distinguish "nothing changed" from "it deleted, but couldn't clean up a locked
+            // backing file" -- showing "could not delete" while the body says "deleted, but..."
+            // told the user both that it failed and that it succeeded in the same dialog.
+            string title = folderWasActuallyDeleted
+                ? "LEC — Pasta apagada com avisos"
+                : "LEC — Não foi possível apagar a pasta";
+            MessageBox.Show(this, failure.Message, title, MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
     }
 
     // True if `candidate` is `ancestor` itself or appears anywhere in its subtree. Used to
-    // decide whether the currently-selected folder is about to be hidden by a delete two
+    // decide whether the currently-selected folder is about to be permanently deleted two
     // levels up (e.g. selection is a grandchild of the folder the user right-clicked).
     private static bool IsDescendantOf(FolderNodeViewModel ancestor, FolderNodeViewModel candidate)
     {
@@ -416,21 +441,41 @@ public partial class MainWindow : Window
             if (dialog.ShowDialog() != true || dialog.SelectedProfile is not { } destinationProfile)
                 return;
 
+            Exception? failure = null;
             treeView.IsEnabled = false;
             try
             {
                 await _viewModel.MoveFolderAsync(profile, node, destinationProfile, dialog.SelectedFolderId);
+            }
+            catch (Exception ex)
+            {
+                failure = ex;
             }
             finally
             {
                 treeView.IsEnabled = true;
             }
 
+            // Same-profile moves only rewrite Folders.dbx (no physical file touched), and
+            // every guard in MoveFolderAsync's same-profile path runs before that rewrite --
+            // so for a same-profile move, any exception really does mean nothing changed.
+            // Cross-profile moves finish with sourceProfile.DeleteFolderAsync, which can now
+            // throw AFTER already deleting the source folder for real (a locked backing file)
+            // -- checking profile.Store.Folders directly, instead of only reacting to the try
+            // block's success, keeps this correct either way (same pattern
+            // ConfirmAndDeleteFolderAsync uses for folderWasActuallyDeleted). Copying to the
+            // destination necessarily succeeded first, since MoveFolderAsync only calls
+            // DeleteFolderAsync after CopyFolderSubtreeAsync returns.
+            bool crossProfile = !ReferenceEquals(profile, destinationProfile);
+            bool moveActuallyHappened = failure is null
+                || (crossProfile && !profile.Store.Folders.Any(f => f.Id == node.Folder.Id));
+
             // A cross-profile move rebuilds BOTH profiles' FolderTrees (the source's via
             // DeleteFolderAsync, the destination's via CreateFolderAsync) -- reset unconditionally
             // whenever the currently displayed profile is either one, not just the source, since
             // a same-profile move already rebuilds only that one tree either way.
-            if (ReferenceEquals(_selectedProfile, profile) || ReferenceEquals(_selectedProfile, destinationProfile))
+            if (moveActuallyHappened
+                && (ReferenceEquals(_selectedProfile, profile) || ReferenceEquals(_selectedProfile, destinationProfile)))
             {
                 _selectedNode = null;
                 _selectedTreeView = null;
@@ -440,6 +485,9 @@ public partial class MainWindow : Window
                 ImagesBlockedBar.Visibility = Visibility.Collapsed;
                 _viewModel.ClearCurrentFolder();
             }
+
+            if (failure is not null)
+                MessageBox.Show(this, failure.Message, "LEC — Não foi possível mover a pasta", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         catch (Exception ex)
         {
