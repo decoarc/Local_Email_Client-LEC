@@ -183,7 +183,7 @@ public class DbxEmailFileWriterTests
     }
 
     [Fact]
-    public void RebuildThrowsWhenGivenMoreThan255Messages()
+    public void RebuildRoundTripsMoreThan255Messages()
     {
         string dir = Path.Combine(Path.GetTempPath(), $"lec-messages-dir-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
@@ -194,8 +194,41 @@ public class DbxEmailFileWriterTests
                 .Select(i => new DbxMessageWriteEntry(Encoding.UTF8.GetBytes($"m{i}"), $"S{i}", null, null, null, null))
                 .ToArray();
 
-            Assert.Throws<ArgumentException>(() => DbxEmailFileWriter.Rebuild(path, entries));
-            Assert.False(File.Exists(path));
+            DbxEmailFileWriter.Rebuild(path, entries);
+
+            using var file = DbxEmailFile.Open(path);
+            Assert.Equal(256, file.Messages.Count);
+            for (int i = 0; i < 256; i++)
+                Assert.Contains(file.Messages, m => m.Subject == $"S{i}");
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void RebuildRoundTripsEnoughMessagesToForceATwoLevelTree()
+    {
+        // 600 messages: the root node takes 255 as its own entries, leaving 345 to distribute
+        // across up to 255 per-entry subtrees (some subtrees end up with 2 messages) --
+        // exercises BuildIndexSubtree recursing more than one level deep, not just a single
+        // extra node.
+        string dir = Path.Combine(Path.GetTempPath(), $"lec-messages-dir-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        string path = Path.Combine(dir, "Messages.dbx");
+        try
+        {
+            var entries = Enumerable.Range(0, 600)
+                .Select(i => new DbxMessageWriteEntry(Encoding.UTF8.GetBytes($"m{i}"), $"S{i}", null, null, null, null))
+                .ToArray();
+
+            DbxEmailFileWriter.Rebuild(path, entries);
+
+            using var file = DbxEmailFile.Open(path);
+            Assert.Equal(600, file.Messages.Count);
+            for (int i = 0; i < 600; i++)
+                Assert.Contains(file.Messages, m => m.Subject == $"S{i}");
         }
         finally
         {
