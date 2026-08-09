@@ -212,8 +212,8 @@ public class DbxEmailFileWriterTests
     {
         // 600 messages: the root node takes 255 as its own entries, leaving 345 to distribute
         // across up to 255 per-entry subtrees (some subtrees end up with 2 messages) --
-        // exercises BuildIndexSubtree recursing more than one level deep, not just a single
-        // extra node.
+        // exercises the multi-node case, where the root's remainder is spread across many
+        // sibling child nodes (all leaves, tree depth 2), not just a single extra node.
         string dir = Path.Combine(Path.GetTempPath(), $"lec-messages-dir-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
         string path = Path.Combine(dir, "Messages.dbx");

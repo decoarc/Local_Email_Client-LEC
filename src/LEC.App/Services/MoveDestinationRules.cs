@@ -8,9 +8,9 @@ namespace LEC.App.Services;
 /// Whether a folder is a legal destination for MainWindowViewModel.MoveMessageAsync,
 /// checked upfront so MoveMessageDialog can disable invalid folders instead of letting
 /// the user pick one and fail after the fact. This does NOT replace
-/// DbxStore.AddMessageAsync's own runtime guards -- a damaged or already-full (255
-/// message) destination still isn't cheaply knowable here (it would mean opening every
-/// folder's backing file just to draw the dialog) and surfaces as a normal error instead.
+/// DbxStore.AddMessageAsync's own runtime guards -- a damaged destination still isn't
+/// cheaply knowable here (it would mean opening every folder's backing file just to draw
+/// the dialog) and surfaces as a normal error instead.
 /// </summary>
 public static class MoveDestinationRules
 {

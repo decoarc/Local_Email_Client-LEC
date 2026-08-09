@@ -385,16 +385,14 @@ public sealed class DbxStore : IMailStore
 
     /// <summary>
     /// Appends a message to a folder — a from-scratch rewrite of that folder's backing
-    /// .dbx (see DbxEmailFileWriter.Rebuild), same "flat tree, ≤255 items" approach as
-    /// CreateFolderAsync/Folders.dbx.
+    /// .dbx (see <see cref="DbxEmailFileWriter.Rebuild"/>), which writes a multi-level index
+    /// tree with no fixed message-count cap.
     /// </summary>
     /// <exception cref="InvalidOperationException">
     /// Thrown when: <paramref name="folderId"/> does not match any existing folder; that
     /// folder has no backing file; or the backing .dbx is damaged (<c>Health != StoreHealth.Ok</c>),
     /// since rebuilding it in that state would silently discard whatever messages this
-    /// reader couldn't parse. If the folder already has 255 messages, the underlying
-    /// <see cref="DbxEmailFileWriter.Rebuild"/> throws <see cref="ArgumentException"/> instead
-    /// — not caught or rewrapped here.
+    /// reader couldn't parse.
     /// </exception>
     /// <remarks>
     /// Not thread-safe: this mutates shared, unsynchronized in-memory state (_openFolders,

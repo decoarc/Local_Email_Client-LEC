@@ -229,7 +229,7 @@ public partial class MainWindowViewModel : ObservableObject
     /// None); or when the subtree has two folders sharing a name (case-insensitive), or a
     /// name that already exists anywhere in destinationProfile — all checked before any
     /// copying starts. Also propagates whatever CreateFolderAsync/AddMessageAsync throws on
-    /// the destination profile beyond that (255-item caps, damaged files) — the source is
+    /// the destination profile beyond that (255-folder cap, damaged files) — the source is
     /// left completely untouched in every one of those cases, though whatever was already
     /// created in the destination before the failure is not rolled back.
     /// </exception>
