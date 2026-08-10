@@ -68,7 +68,10 @@ public partial class OpenProfileDialog : Window
     private void PathTextBox_KeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key == Key.Enter)
+        {
             _browser.NavigateTo(PathTextBox.Text);
+            e.Handled = true;
+        }
     }
 
     private void SelectButton_Click(object sender, RoutedEventArgs e)
