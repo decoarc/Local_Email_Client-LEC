@@ -698,7 +698,22 @@ public partial class MainWindow : Window
         Exception? failure = null;
         try
         {
-            await _viewModel.MoveMessagesAsync(sourceProfile, messages, destinationProfile, destinationFolderId);
+            if (messages.Count == 1)
+            {
+                await _viewModel.MoveMessagesAsync(sourceProfile, messages, destinationProfile, destinationFolderId);
+            }
+            else
+            {
+                // A modal window: ShowDialog() disables this MainWindow -- including the
+                // FolderTreeView -- for as long as it's open. That's what actually prevents the
+                // race that used to happen when the user navigated to the destination folder
+                // mid-batch, reopening a file handle that collided with AddMessageAsync's
+                // Rebuild/File.Move on the same .dbx (see MainWindowViewModel.AddMessageAsync's
+                // eviction comment for the half of this race it already handled).
+                var progressDialog = new MoveMessagesProgressDialog(_viewModel, sourceProfile, messages, destinationProfile, destinationFolderId) { Owner = this };
+                progressDialog.ShowDialog();
+                failure = progressDialog.Failure;
+            }
         }
         catch (Exception ex)
         {
