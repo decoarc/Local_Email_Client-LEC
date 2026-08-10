@@ -38,8 +38,17 @@ public partial class ProfileFolderBrowserViewModel : ObservableObject
         string[] dbxFilePaths;
         try
         {
+            // Normalize before touching the filesystem: strips surrounding quotes from a
+            // path copied via Explorer's "Copy as path", resolves any relative segments
+            // against the current directory instead of storing a relative CurrentPath, and
+            // is a no-op for an already-clean absolute path.
+            path = Path.GetFullPath(path.Trim().Trim('"'));
             subfolderPaths = Directory.GetDirectories(path);
-            dbxFilePaths = Directory.GetFiles(path, "*.dbx");
+            // Win32 8.3 short-name matching can make "*.dbx" over-match (e.g. a file named
+            // "Inbox.dbxbackup"); filter to a real ".dbx" suffix.
+            dbxFilePaths = Directory.GetFiles(path, "*.dbx")
+                .Where(f => f.EndsWith(".dbx", StringComparison.OrdinalIgnoreCase))
+                .ToArray();
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or ArgumentException or System.Security.SecurityException or NotSupportedException)
         {

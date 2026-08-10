@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using LEC.App.ViewModels;
@@ -38,7 +39,7 @@ public class ProfileFolderBrowserViewModelTests
 
         Assert.Equal(temp.Path, vm.CurrentPath);
         Assert.Equal(new[] { "Sub" }, vm.Subfolders);
-        Assert.Equal(new[] { "Folders.dbx", "Inbox.dbx" }, vm.DbxFiles.OrderBy(n => n));
+        Assert.Equal(new[] { "Folders.dbx", "Inbox.dbx" }, vm.DbxFiles);
     }
 
     [Fact]
@@ -123,5 +124,44 @@ public class ProfileFolderBrowserViewModelTests
 
         Assert.Equal(temp.Path, vm.CurrentPath);
         Assert.Equal(new[] { "Inbox.dbx" }, vm.DbxFiles);
+    }
+
+    [Fact]
+    public void NavigateTo_RaisesPropertyChangedForCurrentPath()
+    {
+        using var temp = new TempDirectory();
+        var vm = new ProfileFolderBrowserViewModel();
+        var raisedProperties = new List<string?>();
+        vm.PropertyChanged += (_, e) => raisedProperties.Add(e.PropertyName);
+
+        vm.NavigateTo(temp.Path);
+
+        Assert.Contains(nameof(ProfileFolderBrowserViewModel.CurrentPath), raisedProperties);
+    }
+
+    [Fact]
+    public void NavigateUp_AtRootLevel_IsANoOp()
+    {
+        var vm = new ProfileFolderBrowserViewModel();
+        var subfoldersBefore = vm.Subfolders.ToList();
+
+        vm.NavigateUp();
+
+        Assert.Null(vm.CurrentPath);
+        Assert.Equal(subfoldersBefore, vm.Subfolders);
+    }
+
+    [Fact]
+    public void EnterSubfolder_AtRootLevel_TreatsNameAsADriveRoot()
+    {
+        var vm = new ProfileFolderBrowserViewModel();
+        // Use the drive the test process is actually running from, not Subfolders[0] --
+        // an unrelated drive letter (e.g. an empty CD-ROM drive) could be listed but
+        // fail to navigate into, which would make this test flaky on some machines.
+        var drive = Path.GetPathRoot(Path.GetTempPath())!;
+
+        vm.EnterSubfolder(drive);
+
+        Assert.Equal(drive, vm.CurrentPath);
     }
 }

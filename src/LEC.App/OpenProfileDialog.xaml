@@ -23,7 +23,13 @@
                 <TextBlock DockPanel.Dock="Top" Text="Arquivos .dbx nesta pasta:" FontWeight="Bold" Margin="0,0,0,4"/>
                 <Grid>
                     <TextBlock x:Name="NoDbxMessage" Text="Nenhum arquivo .dbx nesta pasta" Foreground="Gray" Visibility="Collapsed"/>
-                    <ListBox x:Name="DbxFilesListBox" IsHitTestVisible="False" Background="Transparent" BorderThickness="0"/>
+                    <ListBox x:Name="DbxFilesListBox" Background="Transparent" BorderThickness="0">
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem">
+                                <Setter Property="Focusable" Value="False"/>
+                            </Style>
+                        </ListBox.ItemContainerStyle>
+                    </ListBox>
                 </Grid>
             </DockPanel>
         </Grid>
