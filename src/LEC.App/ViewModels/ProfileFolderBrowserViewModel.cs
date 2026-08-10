@@ -41,7 +41,7 @@ public partial class ProfileFolderBrowserViewModel : ObservableObject
             subfolderPaths = Directory.GetDirectories(path);
             dbxFilePaths = Directory.GetFiles(path, "*.dbx");
         }
-        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or ArgumentException or System.Security.SecurityException)
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or ArgumentException or System.Security.SecurityException or NotSupportedException)
         {
             // Navigation failed -- leave CurrentPath/Subfolders/DbxFiles exactly as they were.
             return;

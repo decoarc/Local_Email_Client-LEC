@@ -110,4 +110,18 @@ public class ProfileFolderBrowserViewModelTests
         Assert.NotEmpty(vm.Subfolders);
         Assert.Contains(vm.Subfolders, d => d.StartsWith("C:", StringComparison.OrdinalIgnoreCase));
     }
+
+    [Fact]
+    public void NavigateTo_MalformedPathWithStrayColon_LeavesStateUnchanged()
+    {
+        using var temp = new TempDirectory();
+        File.WriteAllText(Path.Combine(temp.Path, "Inbox.dbx"), "");
+
+        var vm = new ProfileFolderBrowserViewModel();
+        vm.NavigateTo(temp.Path);
+        vm.NavigateTo(Path.Combine(temp.Path, "foo:bar"));
+
+        Assert.Equal(temp.Path, vm.CurrentPath);
+        Assert.Equal(new[] { "Inbox.dbx" }, vm.DbxFiles);
+    }
 }
