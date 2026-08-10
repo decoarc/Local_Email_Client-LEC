@@ -181,31 +181,34 @@ public partial class MainWindowViewModel : ObservableObject
     /// Moves multiple messages (all from the same source folder -- the message list only
     /// ever shows one folder at a time) into a single chosen destination, one at a time via
     /// the existing MoveMessageAsync, stopping at the first failure. Same "nothing to roll
-    /// back" reasoning as DeleteMessagesAsync.
+    /// back" reasoning as DeleteMessagesAsync. Optionally reports progress and honors
+    /// cancellation between messages -- see MoveMessagesProgressDialog, the only current
+    /// caller that passes them.
     /// </summary>
     /// <remarks>
-    /// Known limitation — no progress indicator or cancellation, and cost scales with the
-    /// destination's size. Each message in the batch goes through MoveMessageAsync's
-    /// AddMessageAsync call, which triggers a full DbxEmailFileWriter.Rebuild of the
-    /// destination folder's backing .dbx. Moving a large batch into an already-large
-    /// destination is therefore proportionally expensive I/O -- N rebuilds, each over a
-    /// folder that keeps growing -- with nothing shown to the user while it runs. Accepted
-    /// for this slice; not treated as a defect.
+    /// <paramref name="progress"/> is reported once per message, as (messages moved so
+    /// far) / (total). <paramref name="ct"/> is only checked between messages -- a
+    /// cancellation request never interrupts a message already in flight, so the
+    /// destination's backing .dbx file is never left mid-rewrite.
     /// </remarks>
     /// <exception cref="InvalidOperationException">
     /// Same rewrapping as DeleteMessagesAsync, e.g. "3 de 5 mensagens movidas antes de
     /// falhar: {mensagem original}".
     /// </exception>
     public async Task MoveMessagesAsync(ProfileViewModel sourceProfile, IReadOnlyList<MessageHeader> messages,
-        ProfileViewModel destinationProfile, int destinationFolderId, CancellationToken ct = default)
+        ProfileViewModel destinationProfile, int destinationFolderId,
+        IProgress<double>? progress = null, CancellationToken ct = default)
     {
         int succeeded = 0;
         foreach (var message in messages)
         {
+            ct.ThrowIfCancellationRequested();
+
             try
             {
                 await MoveMessageAsync(sourceProfile, message, destinationProfile, destinationFolderId, ct);
                 succeeded++;
+                progress?.Report((double)succeeded / messages.Count);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
