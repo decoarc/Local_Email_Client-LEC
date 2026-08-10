@@ -206,7 +206,7 @@ public partial class MainWindowViewModel : ObservableObject
 
             try
             {
-                await MoveMessageAsync(sourceProfile, message, destinationProfile, destinationFolderId, ct);
+                await MoveMessageAsync(sourceProfile, message, destinationProfile, destinationFolderId, CancellationToken.None);
                 succeeded++;
                 progress?.Report((double)succeeded / messages.Count);
             }

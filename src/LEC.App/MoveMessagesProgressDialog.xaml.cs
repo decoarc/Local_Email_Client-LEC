@@ -37,10 +37,14 @@ public partial class MoveMessagesProgressDialog : Window
 
     private async void MoveMessagesProgressDialog_Loaded(object sender, RoutedEventArgs e)
     {
-        // SynchronizationContext.Post (System.Progress<T>'s delivery mechanism) marshals back
-        // onto this window's dispatcher thread, exactly like every other UI update here -- safe
-        // to touch ProgressBar/StatusText directly from the callback.
-        var progress = new Progress<double>(p =>
+        Loaded -= MoveMessagesProgressDialog_Loaded;
+
+        // System.Progress<T>.Report always marshals via SynchronizationContext.Post -- queued,
+        // never synchronous, even from this same thread -- which would let a cancellation land
+        // between a Report call and the queued callback that applies it, showing a stale count.
+        // SynchronousProgress applies the update immediately and in-order instead; safe to touch
+        // ProgressBar/StatusText directly since this always runs on this window's dispatcher thread.
+        var progress = new SynchronousProgress<double>(p =>
         {
             _succeeded = (int)Math.Round(p * _messages.Count);
             ProgressBar.Value = p;
@@ -52,7 +56,6 @@ public partial class MoveMessagesProgressDialog : Window
             await _viewModel.MoveMessagesAsync(_sourceProfile, _messages, _destinationProfile, _destinationFolderId, progress, _cts.Token);
             _finished = true;
             DialogResult = true;
-            Close();
         }
         catch (OperationCanceledException)
         {
@@ -93,5 +96,12 @@ public partial class MoveMessagesProgressDialog : Window
 
         _cts.Cancel();
         e.Cancel = true;
+    }
+
+    private sealed class SynchronousProgress<T> : IProgress<T>
+    {
+        private readonly Action<T> _handler;
+        public SynchronousProgress(Action<T> handler) => _handler = handler;
+        public void Report(T value) => _handler(value);
     }
 }

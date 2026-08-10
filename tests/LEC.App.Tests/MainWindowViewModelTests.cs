@@ -567,6 +567,40 @@ public class MainWindowViewModelTests
     }
 
     [Fact]
+    public async Task MoveMessagesAsyncCompletesTheCurrentMessageEvenWhenCancelledDuringItsOwnProgressReport()
+    {
+        // Guards against the loop's ct reaching MoveMessageAsync itself: if it did, a token
+        // cancelled from within the 1st (and only) message's own progress report could abort
+        // that message's copy/hide sequence mid-way, leaving it copied to the destination but
+        // not hidden from the source -- a silent duplicate. MoveMessagesAsync must always call
+        // MoveMessageAsync with CancellationToken.None so cancellation only ever takes effect at
+        // the top of the loop, on the *next* iteration -- which, for a single-message batch,
+        // never comes, so this must complete successfully with no exception at all.
+        var sourceFolder = new StoreFolder { Id = 1, Name = "Origem", IsLoadable = true, HasBackingFile = true };
+        var messageRef = new MessageRef(sourceFolder.Id, 1);
+        var sourceStore = new FakeMailStore(
+            folders: new[] { sourceFolder },
+            rawByRef: new Dictionary<MessageRef, byte[]> { [messageRef] = "um"u8.ToArray() });
+        var sourceProfile = new ProfileViewModel("Origem", @"C:\perfis\Origem", sourceStore);
+
+        var destFolder = new StoreFolder { Id = 10, Name = "Destino", IsLoadable = true, HasBackingFile = true };
+        var destStore = new FakeMailStore(folders: new[] { destFolder });
+        var destProfile = new ProfileViewModel("Destino", @"C:\perfis\Destino", destStore);
+
+        var messages = new List<MessageHeader> { new() { Id = messageRef, Subject = "Um" } };
+        var viewModel = new MainWindowViewModel();
+        var cts = new CancellationTokenSource();
+        // Cancel is requested only after the single message's MoveMessageAsync call has already
+        // fully completed and reported success -- there's no next iteration for it to interrupt.
+        var progress = new SynchronousProgress<double>(p => cts.Cancel());
+
+        await viewModel.MoveMessagesAsync(sourceProfile, messages, destProfile, destFolder.Id, progress, cts.Token);
+
+        Assert.Single(destStore.AddedMessages);
+        Assert.Contains(messageRef, sourceStore.HiddenMessageRefs);
+    }
+
+    [Fact]
     public async Task MoveFolderAsyncWithinTheSameProfileDelegatesToProfileViewModel()
     {
         var folderA = new StoreFolder { Id = 1, Name = "A", IsLoadable = true, HasBackingFile = true };
