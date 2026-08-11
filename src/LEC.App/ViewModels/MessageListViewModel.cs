@@ -128,14 +128,22 @@ public partial class MessageListViewModel : ObservableObject
     // o ReferenceEquals abaixo garante que uma execução cancelada nunca mexe em
     // IsContentLoading/_bodyByMessage/Messages depois que uma execução mais nova já assumiu.
     //
-    // O trabalho bloqueante por mensagem (abrir o arquivo + extrair texto) roda dentro de
-    // Task.Run para sair de fato da thread de UI -- OpenMessageAsync do DbxStore faz I/O
-    // síncrono disfarçado de Task.FromResult, e ExtractSearchableTextAsync opera sobre
-    // MemoryStream (também sempre síncrono), então sem o Task.Run nenhum await neste método
-    // jamais cede de verdade e a pasta inteira seria lida antes de LoadAsync retornar ao
-    // clique que a disparou. Como nenhum ConfigureAwait(false) é usado, a continuação após
-    // o Task.Run volta automaticamente pro contexto original (thread de UI), então as
-    // escritas em _bodyByMessage/IsContentLoading/Messages abaixo continuam de thread única.
+    // IMPORTANTE: isto roda inteiramente na thread de UI, nunca em background de verdade via
+    // Task.Run/thread-pool -- DbxStore não é thread-safe (muta _openFolders/_messagesByFolder
+    // sem sincronização; ver o comentário de AddMessageAsync em DbxStore.cs, que documenta que
+    // TODAS as chamadas contra a mesma instância, incluindo EnumerateHeadersAsync/
+    // OpenMessageAsync, precisam ser serializadas pelo chamador). Rodar OpenMessageAsync numa
+    // thread do pool enquanto LoadAsync chama EnumerateHeadersAsync na UI pra uma pasta
+    // seguinte seria uma corrida de verdade contra esses dicionários.
+    //
+    // Só que OpenMessageAsync do DbxStore faz I/O síncrono disfarçado de Task.FromResult, e
+    // ExtractSearchableTextAsync opera sobre MemoryStream (também sempre síncrono) -- então sem
+    // nenhum ponto de cessão explícito, o loop inteiro rodaria de uma vez, bloqueando a UI até
+    // a pasta inteira ser lida. Task.Yield() resolve isso sem trocar de thread: ele posta a
+    // continuação de volta pro loop de mensagens do WPF via DispatcherSynchronizationContext,
+    // devolvendo o controle pra UI (que processa cliques, renderiza os headers já carregados,
+    // etc.) antes de retomar -- sempre na mesma thread de UI, então o contrato de
+    // single-thread do DbxStore nunca é violado.
     private async Task PreloadContentAsync(List<MessageHeader> headers, CancellationTokenSource ownerCts)
     {
         if (headers.Count == 0)
@@ -146,6 +154,8 @@ public partial class MessageListViewModel : ObservableObject
         }
 
         IsContentLoading = true;
+        await Task.Yield(); // deixa LoadAsync retornar ao clique que o disparou antes de qualquer I/O
+
         try
         {
             int sinceRefresh = 0;
@@ -154,14 +164,12 @@ public partial class MessageListViewModel : ObservableObject
                 ownerCts.Token.ThrowIfCancellationRequested();
                 try
                 {
-                    string body = await Task.Run(async () =>
+                    var stream = await _store.OpenMessageAsync(header.Id, ownerCts.Token);
+                    string body;
+                    await using (stream)
                     {
-                        var stream = await _store.OpenMessageAsync(header.Id, ownerCts.Token);
-                        await using (stream)
-                        {
-                            return await MessageRenderer.ExtractSearchableTextAsync(stream, ownerCts.Token);
-                        }
-                    }, ownerCts.Token);
+                        body = await MessageRenderer.ExtractSearchableTextAsync(stream, ownerCts.Token);
+                    }
 
                     if (ReferenceEquals(_contentLoadCts, ownerCts))
                         _bodyByMessage[header.Id] = body;
@@ -171,6 +179,8 @@ public partial class MessageListViewModel : ObservableObject
                     // Corpo ilegível (MIME corrompido/truncado, ou I/O falhou) -- degrada:
                     // mensagem só não aparece em buscas por Conteúdo, resto do app não é afetado.
                 }
+
+                await Task.Yield(); // cede o controle de volta pro laço de mensagens do WPF entre cada mensagem
 
                 if (++sinceRefresh >= ContentRefreshBatchSize && ReferenceEquals(_contentLoadCts, ownerCts))
                 {
