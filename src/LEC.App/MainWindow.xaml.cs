@@ -171,9 +171,9 @@ public partial class MainWindow : Window
 
     private void OpenProfile_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFolderDialog { Title = "Selecione a pasta do perfil (contendo Folders.dbx)" };
+        var dialog = new OpenProfileDialog { Owner = this };
         if (dialog.ShowDialog() == true)
-            _viewModel.OpenProfile(dialog.FolderName);
+            _viewModel.OpenProfile(dialog.SelectedPath!);
     }
 
     private void CloseProfile_Click(object sender, RoutedEventArgs e)

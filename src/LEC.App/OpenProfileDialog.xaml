@@ -1,0 +1,37 @@
+<Window x:Class="LEC.App.OpenProfileDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Abrir perfil" Width="640" Height="440"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False">
+    <DockPanel Margin="12">
+        <TextBlock DockPanel.Dock="Top" Text="Selecione a pasta do perfil (contendo Folders.dbx):" Margin="0,0,0,8"/>
+        <TextBox x:Name="PathTextBox" DockPanel.Dock="Top" Margin="0,0,0,8" KeyDown="PathTextBox_KeyDown"/>
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button Content="Cancelar" IsCancel="True" Width="120" Margin="0,0,8,0"/>
+            <Button x:Name="SelectButton" Content="Selecionar esta pasta" Width="150" IsDefault="True" Click="SelectButton_Click"/>
+        </StackPanel>
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <DockPanel Grid.Column="0" Margin="0,0,6,0">
+                <TextBlock DockPanel.Dock="Top" Text="Subpastas:" FontWeight="Bold" Margin="0,0,0,4"/>
+                <ListBox x:Name="SubfoldersListBox" MouseDoubleClick="SubfoldersListBox_MouseDoubleClick"/>
+            </DockPanel>
+            <DockPanel Grid.Column="1" Margin="6,0,0,0">
+                <TextBlock DockPanel.Dock="Top" Text="Arquivos .dbx nesta pasta:" FontWeight="Bold" Margin="0,0,0,4"/>
+                <Grid>
+                    <TextBlock x:Name="NoDbxMessage" Text="Nenhum arquivo .dbx nesta pasta" Foreground="Gray" Visibility="Collapsed"/>
+                    <ListBox x:Name="DbxFilesListBox" Background="Transparent" BorderThickness="0">
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem">
+                                <Setter Property="Focusable" Value="False"/>
+                            </Style>
+                        </ListBox.ItemContainerStyle>
+                    </ListBox>
+                </Grid>
+            </DockPanel>
+        </Grid>
+    </DockPanel>
+</Window>
