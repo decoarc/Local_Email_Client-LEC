@@ -334,4 +334,51 @@ public class MessageRendererTests
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             MessageRenderer.SaveAttachmentAsync(RawMessage(raw), attachmentIndex: 0, destinationPath));
     }
+
+    [Fact]
+    public async Task ExtractSearchableTextAsyncReturnsThePlainTextBodyWhenPresent()
+    {
+        string raw =
+            "From: ana@example.com\r\n" +
+            "Subject: Ola\r\n" +
+            "\r\n" +
+            "Corpo em texto puro";
+
+        string text = await MessageRenderer.ExtractSearchableTextAsync(RawMessage(raw));
+
+        Assert.Contains("Corpo em texto puro", text);
+    }
+
+    [Fact]
+    public async Task ExtractSearchableTextAsyncStripsHtmlTagsWhenThereIsNoTextBody()
+    {
+        string raw =
+            "From: ana@example.com\r\n" +
+            "Subject: Ola\r\n" +
+            "Content-Type: text/html\r\n" +
+            "\r\n" +
+            "<p>Corpo <b>em HTML</b></p>";
+
+        string text = await MessageRenderer.ExtractSearchableTextAsync(RawMessage(raw));
+
+        Assert.Contains("Corpo", text);
+        Assert.Contains("em HTML", text);
+        Assert.DoesNotContain("<p>", text);
+        Assert.DoesNotContain("<b>", text);
+    }
+
+    [Fact]
+    public async Task ExtractSearchableTextAsyncFallsBackToRawBytesWhenTheMessageFailsToParse()
+    {
+        // Mesmo cabeçalho usado por FallsBackToRawTextInsteadOfThrowingWhenHeadersAreNotRfcCompliant
+        // acima -- header com espaço no nome do campo, que o parser estrito do MimeKit rejeita.
+        string raw =
+            "X-Bad Header: present so MimeKit's strict parser rejects this\r\n" +
+            "\r\n" +
+            "Corpo da mensagem sem parse";
+
+        string text = await MessageRenderer.ExtractSearchableTextAsync(RawMessage(raw));
+
+        Assert.Contains("Corpo da mensagem sem parse", text);
+    }
 }

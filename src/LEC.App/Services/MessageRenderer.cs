@@ -116,31 +116,38 @@ public static class MessageRenderer
         return index;
     }
 
-    public static async Task<RenderedMessage> RenderAsync(Stream rawMessage, CancellationToken ct = default)
+    // Bufferiza os bytes brutos antes de tentar parsear -- assim, RenderAsync e
+    // ExtractSearchableTextAsync conseguem cair pro texto bruto como fallback mesmo quando o
+    // parse falha, sem precisar reler o stream (que pode não ser buscável/reutilizável).
+    private static async Task<byte[]> ReadAllBytesAsync(Stream stream, CancellationToken ct)
     {
-        // Buffer the raw bytes up front so a MimeKit parse failure can still fall back to
-        // showing them as text -- some real .dbx messages carry headers MimeKit's strict
-        // RFC 5322 parser rejects (e.g. legacy antivirus gateways injecting a field name
-        // containing a space, such as "X-Symantec-Tempo limite da proteção: 0"). Per
-        // ARQUITETURA.md's degradation policy, that must become a readable fallback, not an
-        // unhandled exception that crashes the reading pane.
-        byte[] raw;
-        using (var buffer = new MemoryStream())
-        {
-            await rawMessage.CopyToAsync(buffer, ct);
-            raw = buffer.ToArray();
-        }
+        using var buffer = new MemoryStream();
+        await stream.CopyToAsync(buffer, ct);
+        return buffer.ToArray();
+    }
 
-        MimeMessage? message;
+    // Tenta parsear como MIME; retorna null (nunca lança) em vez de propagar a exceção --
+    // alguns .dbx reais carregam headers que o parser estrito do MimeKit rejeita (ex.: campo
+    // de header injetado por gateway de antivírus legado contendo espaço, como
+    // "X-Symantec-Tempo limite da proteção: 0"). Por política de degradação do ARQUITETURA.md,
+    // isso deve virar um fallback legível, não uma exceção não tratada.
+    private static async Task<MimeMessage?> TryParseAsync(byte[] raw, CancellationToken ct)
+    {
         try
         {
             using var parseStream = new MemoryStream(raw);
-            message = await MimeMessage.LoadAsync(parseStream, ct);
+            return await MimeMessage.LoadAsync(parseStream, ct);
         }
         catch (FormatException)
         {
-            message = null;
+            return null;
         }
+    }
+
+    public static async Task<RenderedMessage> RenderAsync(Stream rawMessage, CancellationToken ct = default)
+    {
+        byte[] raw = await ReadAllBytesAsync(rawMessage, ct);
+        MimeMessage? message = await TryParseAsync(raw, ct);
 
         if (message is null)
         {
@@ -157,6 +164,34 @@ public static class MessageRenderer
             : null;
 
         return new RenderedMessage(message.Subject, fromDisplay, message.Date, html, ExtractAttachments(message));
+    }
+
+    // Regex simples pra remover tags ao extrair texto pesquisável de um HtmlBody -- não
+    // precisa ser um parser HTML de verdade (como o restante deste arquivo faz pra
+    // renderização real), só precisa produzir texto razoável pra comparar substring contra o
+    // termo buscado.
+    private static readonly Regex HtmlTagRegex = new(@"<[^>]+>", RegexOptions.Compiled);
+
+    /// <summary>
+    /// Extrai um texto pesquisável do corpo da mensagem, pra uso da busca por "Conteúdo" em
+    /// MessageListViewModel -- nunca lança: mensagem que falha ao parsear cai pro mesmo
+    /// fallback de bytes brutos que RenderAsync usa pra exibição.
+    /// </summary>
+    public static async Task<string> ExtractSearchableTextAsync(Stream rawMessage, CancellationToken ct = default)
+    {
+        byte[] raw = await ReadAllBytesAsync(rawMessage, ct);
+        MimeMessage? message = await TryParseAsync(raw, ct);
+
+        if (message is null)
+            return Encoding.Latin1.GetString(raw);
+
+        if (message.TextBody is { } text)
+            return text;
+
+        if (message.HtmlBody is { } html)
+            return WebUtility.HtmlDecode(HtmlTagRegex.Replace(html, " "));
+
+        return string.Empty;
     }
 
     // MimeMessage.Attachments é puramente baseado em ContentDisposition?.IsAttachment -- não
