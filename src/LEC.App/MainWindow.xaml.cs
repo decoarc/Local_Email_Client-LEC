@@ -385,6 +385,10 @@ public partial class MainWindow : Window
         treeView.IsEnabled = false;
         try
         {
+            // DeleteFolderAsync mutates DbxStore on a background thread and disposes the
+            // folder's backing DbxEmailFile/mapped view -- the same preload-vs-mutation race
+            // already handled for message move/delete and folder move. Cancel first.
+            _viewModel.MessageList?.CancelContentPreload();
             await profile.DeleteFolderAsync(node.Folder.Id);
         }
         catch (Exception ex)

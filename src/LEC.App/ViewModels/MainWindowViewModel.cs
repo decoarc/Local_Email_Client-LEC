@@ -277,6 +277,12 @@ public partial class MainWindowViewModel : ObservableObject
     public async Task MoveFolderAsync(ProfileViewModel sourceProfile, FolderNodeViewModel sourceNode,
         ProfileViewModel destinationProfile, int? destinationParentId, CancellationToken ct = default)
     {
+        // Same race as message move/delete: both branches below mutate DbxStore on a
+        // background thread (Task.Run), and the cross-profile branch's DeleteFolderAsync
+        // disposes the folder's backing DbxEmailFile/mapped view -- worse than stale state if
+        // a preload mid-read hits it. Cancel before either branch touches the store.
+        MessageList?.CancelContentPreload();
+
         if (ReferenceEquals(sourceProfile, destinationProfile))
         {
             await sourceProfile.MoveFolderAsync(sourceNode.Folder.Id, destinationParentId);
