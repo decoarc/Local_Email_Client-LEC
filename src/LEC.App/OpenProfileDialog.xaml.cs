@@ -104,7 +104,22 @@ public partial class OpenProfileDialog : Window
         // Enter first -- commit whatever is in the box before reading CurrentPath, or
         // the dialog would silently confirm a different folder than the one displayed.
         if (PathTextBox.Text != (_browser.CurrentPath ?? ""))
+        {
+            string? pathBeforeAttempt = _browser.CurrentPath;
             _browser.NavigateTo(PathTextBox.Text);
+
+            // NavigateTo fails silently and leaves CurrentPath exactly as it was --
+            // if it's unchanged, the typed path didn't actually take. Confirming here
+            // would silently select the stale prior folder instead of what's in the
+            // box, so revert the box (same feedback as a failed Enter-navigation) and
+            // bail instead of falling through to the null-check below, which can't
+            // tell "never navigated" apart from "just failed to navigate".
+            if (_browser.CurrentPath == pathBeforeAttempt)
+            {
+                PathTextBox.Text = _browser.CurrentPath ?? "";
+                return;
+            }
+        }
 
         if (_browser.CurrentPath is null)
             return;
