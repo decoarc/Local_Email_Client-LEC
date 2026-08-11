@@ -1,5 +1,6 @@
 // tests/LEC.App.Tests/MessageListViewModelTests.cs
 using System.Linq;
+using System.Text;
 using LEC.App.ViewModels;
 using LEC.MailStore;
 using Xunit;
@@ -313,5 +314,73 @@ public class MessageListViewModelTests
         vm.SortBySender();
 
         Assert.Equal(new[] { "Relatorio A", "Relatorio B" }, vm.Messages.Select(m => m.Subject));
+    }
+
+    [Fact]
+    public async Task FiltersByContentAfterPreloadCompletes()
+    {
+        var folder = new StoreFolder { Id = 1, Name = "Caixa de entrada", IsLoadable = true, HasBackingFile = true };
+        var withMatch = new MessageHeader { Id = new MessageRef(1, 1), Subject = "A" };
+        var withoutMatch = new MessageHeader { Id = new MessageRef(1, 2), Subject = "B" };
+        byte[] RawWithBody(string body) => Encoding.ASCII.GetBytes("From: a@b.com\r\nSubject: X\r\n\r\n" + body);
+
+        var store = new FakeMailStore(
+            folders: new[] { folder },
+            headersByFolder: new() { [1] = new() { withMatch, withoutMatch } },
+            rawByRef: new()
+            {
+                [withMatch.Id] = RawWithBody("Este e-mail fala sobre laranjas"),
+                [withoutMatch.Id] = RawWithBody("Este e-mail fala sobre maçãs"),
+            });
+
+        var vm = new MessageListViewModel(store);
+        await vm.LoadAsync(folder);
+        await vm.ContentLoadTask;
+
+        vm.SearchField = MessageSearchField.Content;
+        vm.SearchText = "LARANJAS";
+
+        Assert.Equal(new[] { "A" }, vm.Messages.Select(m => m.Subject));
+    }
+
+    [Fact]
+    public async Task IsContentLoadingBecomesFalseAfterPreloadCompletes()
+    {
+        var folder = new StoreFolder { Id = 1, Name = "Caixa de entrada", IsLoadable = true, HasBackingFile = true };
+        var header = new MessageHeader { Id = new MessageRef(1, 1), Subject = "A" };
+        var store = new FakeMailStore(
+            folders: new[] { folder },
+            headersByFolder: new() { [1] = new() { header } },
+            rawByRef: new() { [header.Id] = Encoding.ASCII.GetBytes("From: a@b.com\r\nSubject: X\r\n\r\nCorpo") });
+
+        var vm = new MessageListViewModel(store);
+        await vm.LoadAsync(folder);
+        await vm.ContentLoadTask;
+
+        Assert.False(vm.IsContentLoading);
+    }
+
+    [Fact]
+    public async Task ContentSearchIgnoresMessagesWhoseBodyFailsToLoad()
+    {
+        var folder = new StoreFolder { Id = 1, Name = "Caixa de entrada", IsLoadable = true, HasBackingFile = true };
+        var unreadable = new MessageHeader { Id = new MessageRef(1, 1), Subject = "Corrompida" };
+        var store = new FakeMailStore(
+            folders: new[] { folder },
+            headersByFolder: new() { [1] = new() { unreadable } });
+        // Nenhum rawByRef registrado para este MessageRef -- OpenMessageAsync do FakeMailStore
+        // lança InvalidOperationException, simulando um corpo ilegível/corrompido.
+
+        var vm = new MessageListViewModel(store);
+        await vm.LoadAsync(folder);
+        await vm.ContentLoadTask;
+
+        vm.SearchField = MessageSearchField.Content;
+        vm.SearchText = "qualquer coisa";
+        Assert.Empty(vm.Messages);
+
+        vm.SearchField = MessageSearchField.Subject;
+        vm.SearchText = "Corrompida";
+        Assert.Single(vm.Messages);
     }
 }
