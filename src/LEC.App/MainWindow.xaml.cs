@@ -41,7 +41,23 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         DataContext = _viewModel;
+        _viewModel.PropertyChanged += ViewModel_PropertyChanged;
         Loaded += MainWindow_Loaded;
+    }
+
+    // MainWindowViewModel.MessageList is replaced with a brand-new instance on every profile
+    // switch (and nulled when the profile closes), so the selection-preserving hook has to be
+    // re-attached each time rather than once at construction -- see
+    // MessageListViewModel.WrapMessagesChange for why the view model needs the hook at all
+    // (the background content preload calls ApplyFilter() with no code-behind call site to
+    // wrap).
+    private void ViewModel_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(MainWindowViewModel.MessageList))
+            return;
+
+        if (_viewModel.MessageList is { } messageList)
+            messageList.WrapMessagesChange = ApplyToMessageListPreservingSelection;
     }
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
@@ -688,6 +704,11 @@ public partial class MainWindow : Window
     // MessageListView_SelectionChanged. Captura a seleção antes da mudança e restaura depois,
     // pra ordenar/filtrar ser transparente ao usuário sempre que a mensagem selecionada
     // continuar aparecendo.
+    //
+    // Além de ser chamado direto pelos handlers acima, é ligado como
+    // MessageListViewModel.WrapMessagesChange (ver ViewModel_PropertyChanged) pra cobrir também
+    // os ApplyFilter() que o pré-carregamento de conteúdo dispara sozinho em background, que não
+    // têm handler nenhum aqui pra envolver.
     private void ApplyToMessageListPreservingSelection(Action applyChange)
     {
         var selected = MessageListView.SelectedItems.Cast<MessageHeader>().ToList();

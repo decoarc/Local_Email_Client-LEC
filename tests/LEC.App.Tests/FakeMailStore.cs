@@ -39,8 +39,15 @@ internal sealed class FakeMailStore : IMailStore
         await Task.CompletedTask;
     }
 
+    // Registra cada leitura pra um teste poder observar que um pré-carregamento de conteúdo
+    // superado realmente PAROU de ler (e não só que os resultados dele foram descartados) --
+    // ver SwitchingFoldersMidPreloadNeverLeaksThePreviousFoldersBodiesIntoTheNewFolder.
+    public List<MessageRef> OpenedMessageRefs { get; } = new();
+
     public Task<Stream> OpenMessageAsync(MessageRef id, CancellationToken ct = default)
     {
+        OpenedMessageRefs.Add(id);
+
         if (!_rawByRef.TryGetValue(id, out var raw))
             throw new InvalidOperationException($"No raw bytes registered for {id}.");
 

@@ -59,7 +59,27 @@ public partial class MessageListViewModel : ObservableObject
     [ObservableProperty]
     private bool _isContentLoading;
 
+    /// <summary>
+    /// Optional hook the view sets so every Messages mutation — whether triggered from the
+    /// UI (search box, toggle, sort click) or from the background content preload — goes
+    /// through the same selection-preserving wrapper. Without this, PreloadContentAsync's own
+    /// ApplyFilter() calls would blank the WPF ListView's selection with no code-behind call
+    /// site able to wrap them (unlike the UI-triggered paths, which Task 5 already wraps).
+    /// </summary>
+    public Action<Action>? WrapMessagesChange { get; set; }
+
     public MessageListViewModel(IMailStore store) => _store = store;
+
+    /// <summary>
+    /// Cancela o pré-carregamento de conteúdo em voo (se houver). Precisa ser chamado antes de
+    /// qualquer operação que mute o store numa thread de background -- DbxStore.AddMessageAsync
+    /// roda o corpo inteiro dentro de Task.Run e mexe em _openFolders/_messagesByFolder, os
+    /// mesmos dicionários que o OpenMessageAsync do pré-carregamento lê ao retomar na thread de
+    /// UI (ver o remarks de AddMessageAsync em DbxStore.cs, que exige serialização pelo
+    /// chamador). Não é preciso religar nada depois: todo call site já refaz um
+    /// SelectFolderAsync na sequência, e LoadAsync sempre dispara um pré-carregamento novo.
+    /// </summary>
+    public void CancelContentPreload() => _contentLoadCts?.Cancel();
 
     public async Task LoadAsync(StoreFolder folder, CancellationToken ct = default)
     {
@@ -102,15 +122,27 @@ public partial class MessageListViewModel : ObservableObject
         UpdateColumnHeaders();
     }
 
+    // Toda mutação de Messages passa por aqui -- inclusive as disparadas pelo próprio
+    // PreloadContentAsync, que não têm call site no code-behind pra envolver. Por isso o
+    // wrapper de preservação de seleção é um hook do view model (WrapMessagesChange), e não
+    // só um helper chamado nos handlers da UI.
     private void ApplyFilter()
     {
-        IEnumerable<MessageHeader> filtered = string.IsNullOrEmpty(SearchText)
-            ? _headers
-            : _headers.Where(MatchesSearch);
+        void Apply()
+        {
+            IEnumerable<MessageHeader> filtered = string.IsNullOrEmpty(SearchText)
+                ? _headers
+                : _headers.Where(MatchesSearch);
 
-        Messages.Clear();
-        foreach (var header in filtered)
-            Messages.Add(header);
+            Messages.Clear();
+            foreach (var header in filtered)
+                Messages.Add(header);
+        }
+
+        if (WrapMessagesChange is { } wrap)
+            wrap(Apply);
+        else
+            Apply();
     }
 
     private bool MatchesSearch(MessageHeader header) => SearchField switch

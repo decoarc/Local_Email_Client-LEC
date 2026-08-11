@@ -51,6 +51,15 @@ public partial class MainWindowViewModel : ObservableObject
     {
         bool wasActive = ReferenceEquals(ActiveProfile, profile);
 
+        // The content preload reads through this profile's store one message at a time,
+        // resuming on the dispatcher between messages -- cancel it BEFORE disposing that
+        // store below, so a pending resume sees a clean cancellation instead of doing I/O
+        // against a disposed store. Same cancel-before-dispose ordering CloseProfile_Click
+        // already applies to an in-flight scavenge scan. ClearCurrentFolder() also cancels,
+        // but it only runs after the Dispose below -- too late for this one iteration.
+        if (wasActive)
+            MessageList?.CancelContentPreload();
+
         OpenProfiles.Remove(profile);
         profile.Store.Dispose();
 
@@ -66,6 +75,11 @@ public partial class MainWindowViewModel : ObservableObject
     // or the folder itself was just deleted or moved out from under the current selection.
     public void ClearCurrentFolder()
     {
+        // Nothing points at the outgoing MessageList after this, but its in-flight preload
+        // Task keeps a strong reference to it (and to the store it reads from) and would run
+        // to completion regardless -- cancel it instead of leaving it churning against a
+        // folder/profile that is no longer on screen.
+        MessageList?.CancelContentPreload();
         MessageList = null;
         MessageReader = null;
         CurrentFolderScavengeStatus = null;
@@ -75,6 +89,10 @@ public partial class MainWindowViewModel : ObservableObject
     {
         if (!ReferenceEquals(ActiveProfile, profile))
         {
+            // Same reasoning as ClearCurrentFolder: the instance being replaced here is
+            // orphaned, but its preload isn't -- and it reads from the OLD profile's store,
+            // which LoadAsync on the new instance can never supersede.
+            MessageList?.CancelContentPreload();
             ActiveProfile = profile;
             MessageList = new MessageListViewModel(profile.Store);
             MessageReader = new MessageReaderViewModel(profile.Store);
@@ -129,6 +147,13 @@ public partial class MainWindowViewModel : ObservableObject
         if (ReferenceEquals(sourceProfile, destinationProfile) && message.Id.FolderId == destinationFolderId)
             throw new InvalidOperationException("Não é possível mover uma mensagem para a mesma pasta.");
 
+        // AddMessageAsync below runs its whole body on a thread-pool thread (Task.Run) and
+        // evicts/rewrites _openFolders/_messagesByFolder -- exactly the dictionaries the
+        // message list's content preload reads via OpenMessageAsync when it resumes on the
+        // dispatcher. Cancel the preload first; the SelectFolderAsync every call site runs
+        // afterward starts a fresh one.
+        MessageList?.CancelContentPreload();
+
         using var stream = await sourceProfile.Store.OpenMessageAsync(message.Id, ct);
         using var ms = new MemoryStream();
         await stream.CopyToAsync(ms, ct);
@@ -146,6 +171,11 @@ public partial class MainWindowViewModel : ObservableObject
     /// </summary>
     public async Task DeleteMessageAsync(ProfileViewModel profile, MessageHeader message, CancellationToken ct = default)
     {
+        // Deletes only touch the hide caches, which OpenMessageAsync doesn't read today --
+        // so unlike the move path this isn't a known race. Cancelled anyway, for consistency
+        // with every other store mutation here, rather than depending on that staying true.
+        MessageList?.CancelContentPreload();
+
         await profile.Store.DeleteMessageAsync(message.Id, ct);
     }
 
@@ -162,6 +192,10 @@ public partial class MainWindowViewModel : ObservableObject
     /// </exception>
     public async Task DeleteMessagesAsync(ProfileViewModel profile, IReadOnlyList<MessageHeader> messages, CancellationToken ct = default)
     {
+        // Once at the top, not per message: the preload can't resume between here and the
+        // end of the batch without seeing the cancellation first.
+        MessageList?.CancelContentPreload();
+
         int succeeded = 0;
         foreach (var message in messages)
         {
@@ -199,6 +233,10 @@ public partial class MainWindowViewModel : ObservableObject
         ProfileViewModel destinationProfile, int destinationFolderId,
         IProgress<double>? progress = null, CancellationToken ct = default)
     {
+        // Once at the top, not per message -- see DeleteMessagesAsync. (MoveMessageAsync
+        // cancels again on each item; cancelling an already-cancelled source is a no-op.)
+        MessageList?.CancelContentPreload();
+
         int succeeded = 0;
         foreach (var message in messages)
         {

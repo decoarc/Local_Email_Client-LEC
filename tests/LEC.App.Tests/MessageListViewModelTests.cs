@@ -360,6 +360,128 @@ public class MessageListViewModelTests
         Assert.False(vm.IsContentLoading);
     }
 
+    // Cobre o handshake de supersessão do pré-carregamento (_contentLoadCts + os ReferenceEquals
+    // dentro de PreloadContentAsync + o _bodyByMessage.Clear() no LoadAsync): trocar de pasta com
+    // o pré-carregamento da anterior ainda em voo não pode deixar o corpo de nenhuma mensagem da
+    // pasta antiga vazar pro dicionário da nova. Todos os outros testes de conteúdo esperam
+    // ContentLoadTask terminar antes de trocar de pasta, então nenhum deles exercita isso.
+    [Fact]
+    public void SwitchingFoldersMidPreloadNeverLeaksThePreviousFoldersBodiesIntoTheNewFolder()
+    {
+        var folderA = new StoreFolder { Id = 1, Name = "A", IsLoadable = true, HasBackingFile = true };
+        var folderB = new StoreFolder { Id = 2, Name = "B", IsLoadable = true, HasBackingFile = true };
+        // A pasta A tem muitas mensagens de propósito: com uma só, o pré-carregamento dela seria
+        // cancelado antes de ler qualquer corpo, e a supersessão nunca aconteceria "no meio".
+        var aMessages = Enumerable.Range(1, 50)
+            .Select(i => new MessageHeader { Id = new MessageRef(1, i), Subject = $"DaA{i}" })
+            .ToList();
+        var bMessage = new MessageHeader { Id = new MessageRef(2, 1), Subject = "DaB" };
+        byte[] RawWithBody(string body) => Encoding.ASCII.GetBytes("From: a@b.com\r\nSubject: X\r\n\r\n" + body);
+
+        var rawByRef = aMessages.ToDictionary(m => m.Id, _ => RawWithBody("segredo da pasta A"));
+        rawByRef[bMessage.Id] = RawWithBody("conteudo da pasta B");
+
+        var store = new FakeMailStore(
+            folders: new[] { folderA, folderB },
+            headersByFolder: new() { [1] = aMessages, [2] = new() { bMessage } },
+            rawByRef: rawByRef);
+
+        var vm = new MessageListViewModel(store);
+
+        var previousContext = SynchronizationContext.Current;
+        var pump = new ManualPumpSynchronizationContext();
+        SynchronizationContext.SetSynchronizationContext(pump);
+        try
+        {
+            var loadA = vm.LoadAsync(folderA);
+            PumpUntil(pump, () => loadA.IsCompleted);
+
+            // Sem esperar vm.ContentLoadTask de propósito: só algumas continuações do
+            // pré-carregamento da pasta A rodam, então a pasta B assume com ele realmente em voo.
+            pump.Pump(10);
+
+            int readsFromABeforeSwitch = store.OpenedMessageRefs.Count(r => r.FolderId == folderA.Id);
+            Assert.InRange(readsFromABeforeSwitch, 1, aMessages.Count - 1); // realmente no meio
+
+            var loadB = vm.LoadAsync(folderB);
+            PumpUntil(pump, () => loadB.IsCompleted);
+            PumpUntil(pump, () => vm.ContentLoadTask.IsCompleted);
+
+            // Drena tudo que sobrou na fila -- inclusive o que restou do pré-carregamento
+            // superado da pasta A, que aqui tem toda a chance do mundo de continuar lendo.
+            pump.PumpAll();
+
+            // A asserção que prova o cancelamento em si, e não só que o resultado dele foi
+            // descartado: o pré-carregamento superado no máximo termina a mensagem que já estava
+            // em voo e para -- nunca varre o resto da pasta A depois que a pasta B assumiu.
+            int readsFromAAfterSwitch = store.OpenedMessageRefs.Count(r => r.FolderId == folderA.Id);
+            Assert.Equal(readsFromABeforeSwitch, readsFromAAfterSwitch);
+
+            Assert.False(vm.IsContentLoading); // o preload superado não pode mexer neste estado
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previousContext);
+        }
+
+        vm.SearchField = MessageSearchField.Content;
+
+        vm.SearchText = "segredo"; // só existe nos corpos da pasta A
+        Assert.Empty(vm.Messages);
+
+        // Controle positivo: prova que a lista acima ficou vazia por isolamento entre pastas, e
+        // não porque o pré-carregamento da pasta B foi derrubado junto com o da pasta A (é esta
+        // asserção que quebra se o handshake de supersessão cancelar/perder o preload novo).
+        vm.SearchText = "conteudo";
+        Assert.Equal(new[] { "DaB" }, vm.Messages.Select(m => m.Subject));
+    }
+
+    private static void PumpUntil(ManualPumpSynchronizationContext pump, Func<bool> isDone, int maxSteps = 10_000)
+    {
+        for (int i = 0; i < maxSteps && !isDone(); i++)
+        {
+            if (pump.Pump(1) == 0)
+                break; // fila vazia: nada mais vai acontecer sozinho
+        }
+
+        Assert.True(isDone(), "a fila de continuações esvaziou antes da operação esperada terminar");
+    }
+
+    // SynchronizationContext de fila única, drenado manualmente pelo teste. Existe pra tornar a
+    // supersessão do pré-carregamento determinística: com ele instalado, cada YieldToUiAsync do
+    // PreloadContentAsync vira um item de fila que só roda quando o teste mandar -- exatamente
+    // como o Dispatcher do WPF serializa tudo na thread de UI da aplicação real. Sem ele, o
+    // contexto do xUnit despacha as continuações pro thread pool, que pode rodá-las EM PARALELO
+    // com o corpo do teste: além de deixar o teste intermitente (medido: ~1 falha a cada 8
+    // execuções), isso põe duas threads mexendo no mesmo Dictionary, uma corrida que a aplicação
+    // real não tem.
+    private sealed class ManualPumpSynchronizationContext : SynchronizationContext
+    {
+        private readonly Queue<(SendOrPostCallback Callback, object? State)> _queue = new();
+
+        public override void Post(SendOrPostCallback d, object? state) => _queue.Enqueue((d, state));
+
+        public override void Send(SendOrPostCallback d, object? state) => d(state);
+
+        public override SynchronizationContext CreateCopy() => this;
+
+        /// <summary>Roda até <paramref name="steps"/> continuações pendentes; devolve quantas rodaram.</summary>
+        public int Pump(int steps)
+        {
+            int ran = 0;
+            while (ran < steps && _queue.Count > 0)
+            {
+                var (callback, state) = _queue.Dequeue();
+                callback(state);
+                ran++;
+            }
+            return ran;
+        }
+
+        /// <summary>Drena a fila inteira, com teto pra nunca travar o teste.</summary>
+        public void PumpAll(int maxSteps = 10_000) => Pump(maxSteps);
+    }
+
     [Fact]
     public async Task ContentSearchIgnoresMessagesWhoseBodyFailsToLoad()
     {
