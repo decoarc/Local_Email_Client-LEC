@@ -4,7 +4,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
         xmlns:conv="clr-namespace:LEC.App.Converters"
-        Title="LEC — Local Email Client" Height="720" Width="1100">
+        Title="LEC — Local Email Client" Height="720" Width="1100"
+        Icon="Assets/LEC_Logo.png">
     <Window.Resources>
         <conv:LoadableToBrushConverter x:Key="LoadableToBrushConverter"/>
         <conv:SpecialToFontWeightConverter x:Key="SpecialToFontWeightConverter"/>
@@ -54,6 +55,11 @@
                                             <MenuItem Header="Nova pasta..." Click="NewTopLevelFolder_Click"/>
                                         </ContextMenu>
                                     </TreeView.ContextMenu>
+                                    <TreeView.ItemContainerStyle>
+                                        <Style TargetType="TreeViewItem">
+                                            <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}"/>
+                                        </Style>
+                                    </TreeView.ItemContainerStyle>
                                     <TreeView.ItemTemplate>
                                         <HierarchicalDataTemplate ItemsSource="{Binding Children}">
                                             <TextBlock Text="{Binding DisplayName}"
