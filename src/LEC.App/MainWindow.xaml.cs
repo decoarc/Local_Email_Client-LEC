@@ -171,9 +171,15 @@ public partial class MainWindow : Window
 
     private void OpenProfile_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new OpenProfileDialog { Owner = this };
+        var dialog = new OpenFileDialog
+        {
+            Title = "Selecione um arquivo .dbx do perfil (ex: Folders.dbx)",
+            Filter = "Arquivos .dbx (*.dbx)|*.dbx",
+            CheckFileExists = true,
+        };
+
         if (dialog.ShowDialog() == true)
-            _viewModel.OpenProfile(dialog.SelectedPath!);
+            _viewModel.OpenProfile(Path.GetDirectoryName(dialog.FileName)!);
     }
 
     private void CloseProfile_Click(object sender, RoutedEventArgs e)
