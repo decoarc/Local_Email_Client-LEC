@@ -188,4 +188,130 @@ public class MessageListViewModelTests
         Assert.Equal(new[] { "B-Alfa", "B-Bravo" }, vm.Messages.Select(m => m.Subject));
         Assert.Equal("De ▲", vm.SenderColumnHeader);
     }
+
+    [Fact]
+    public async Task FiltersBySenderNameCaseInsensitively()
+    {
+        var folder = new StoreFolder { Id = 1, Name = "Caixa de entrada", IsLoadable = true, HasBackingFile = true };
+        var joao = new MessageHeader { Id = new MessageRef(1, 1), Subject = "Assunto A", SenderName = "Joao Silva" };
+        var maria = new MessageHeader { Id = new MessageRef(1, 2), Subject = "Assunto B", SenderName = "Maria Souza" };
+        var store = new FakeMailStore(
+            folders: new[] { folder },
+            headersByFolder: new() { [1] = new() { joao, maria } });
+
+        var vm = new MessageListViewModel(store);
+        await vm.LoadAsync(folder);
+
+        vm.SearchField = MessageSearchField.Sender;
+        vm.SearchText = "JOAO";
+
+        Assert.Equal(new[] { "Assunto A" }, vm.Messages.Select(m => m.Subject));
+    }
+
+    [Fact]
+    public async Task FiltersBySubjectCaseInsensitively()
+    {
+        var folder = new StoreFolder { Id = 1, Name = "Caixa de entrada", IsLoadable = true, HasBackingFile = true };
+        var relatorio = new MessageHeader { Id = new MessageRef(1, 1), Subject = "Relatorio mensal" };
+        var outro = new MessageHeader { Id = new MessageRef(1, 2), Subject = "Reuniao" };
+        var store = new FakeMailStore(
+            folders: new[] { folder },
+            headersByFolder: new() { [1] = new() { relatorio, outro } });
+
+        var vm = new MessageListViewModel(store);
+        await vm.LoadAsync(folder); // SearchField já começa em Subject por padrão
+
+        vm.SearchText = "RELATORIO";
+
+        Assert.Equal(new[] { "Relatorio mensal" }, vm.Messages.Select(m => m.Subject));
+    }
+
+    [Fact]
+    public async Task EmptySearchTextShowsAllMessages()
+    {
+        var folder = new StoreFolder { Id = 1, Name = "Caixa de entrada", IsLoadable = true, HasBackingFile = true };
+        var a = new MessageHeader { Id = new MessageRef(1, 1), Subject = "A", SenderName = "Alfa" };
+        var b = new MessageHeader { Id = new MessageRef(1, 2), Subject = "B", SenderName = "Bravo" };
+        var store = new FakeMailStore(
+            folders: new[] { folder },
+            headersByFolder: new() { [1] = new() { a, b } });
+
+        var vm = new MessageListViewModel(store);
+        await vm.LoadAsync(folder);
+
+        vm.SearchField = MessageSearchField.Sender;
+        vm.SearchText = "Alfa";
+        Assert.Single(vm.Messages);
+
+        vm.SearchText = string.Empty;
+        Assert.Equal(2, vm.Messages.Count);
+    }
+
+    [Fact]
+    public async Task SwitchingSearchFieldReappliesImmediatelyWithExistingText()
+    {
+        var folder = new StoreFolder { Id = 1, Name = "Caixa de entrada", IsLoadable = true, HasBackingFile = true };
+        // "Ana" aparece no remetente da primeira mensagem e no assunto da segunda -- prova que
+        // é o toggle, não o texto, que decide o que é comparado.
+        var bySender = new MessageHeader { Id = new MessageRef(1, 1), Subject = "Assunto qualquer", SenderName = "Ana Paula" };
+        var bySubject = new MessageHeader { Id = new MessageRef(1, 2), Subject = "Fotos da Ana", SenderName = "Carlos" };
+        var store = new FakeMailStore(
+            folders: new[] { folder },
+            headersByFolder: new() { [1] = new() { bySender, bySubject } });
+
+        var vm = new MessageListViewModel(store);
+        await vm.LoadAsync(folder);
+        vm.SearchText = "Ana";
+
+        vm.SearchField = MessageSearchField.Sender;
+        Assert.Equal(new[] { "Assunto qualquer" }, vm.Messages.Select(m => m.Subject));
+
+        vm.SearchField = MessageSearchField.Subject;
+        Assert.Equal(new[] { "Fotos da Ana" }, vm.Messages.Select(m => m.Subject));
+    }
+
+    [Fact]
+    public async Task LoadAsyncResetsSearchTextAndFieldToDefaults()
+    {
+        var folderA = new StoreFolder { Id = 1, Name = "A", IsLoadable = true, HasBackingFile = true };
+        var folderB = new StoreFolder { Id = 2, Name = "B", IsLoadable = true, HasBackingFile = true };
+        var store = new FakeMailStore(
+            folders: new[] { folderA, folderB },
+            headersByFolder: new()
+            {
+                [1] = new() { new MessageHeader { Id = new MessageRef(1, 1), Subject = "A1", SenderName = "Alfa" } },
+                [2] = new() { new MessageHeader { Id = new MessageRef(2, 1), Subject = "B1", SenderName = "Bravo" } },
+            });
+
+        var vm = new MessageListViewModel(store);
+        await vm.LoadAsync(folderA);
+        vm.SearchField = MessageSearchField.Sender;
+        vm.SearchText = "Alfa";
+
+        await vm.LoadAsync(folderB);
+
+        Assert.Equal(string.Empty, vm.SearchText);
+        Assert.Equal(MessageSearchField.Subject, vm.SearchField);
+        Assert.Single(vm.Messages); // sem filtro, mostra a única mensagem da pasta B
+    }
+
+    [Fact]
+    public async Task FilterComposesWithSort()
+    {
+        var folder = new StoreFolder { Id = 1, Name = "Caixa de entrada", IsLoadable = true, HasBackingFile = true };
+        var bravo = new MessageHeader { Id = new MessageRef(1, 1), Subject = "Relatorio B", SenderName = "Bravo" };
+        var alfa = new MessageHeader { Id = new MessageRef(1, 2), Subject = "Relatorio A", SenderName = "Alfa" };
+        var outro = new MessageHeader { Id = new MessageRef(1, 3), Subject = "Outro assunto", SenderName = "Charlie" };
+        var store = new FakeMailStore(
+            folders: new[] { folder },
+            headersByFolder: new() { [1] = new() { bravo, alfa, outro } });
+
+        var vm = new MessageListViewModel(store);
+        await vm.LoadAsync(folder);
+        vm.SearchText = "Relatorio"; // SearchField padrão = Subject
+
+        vm.SortBySender();
+
+        Assert.Equal(new[] { "Relatorio A", "Relatorio B" }, vm.Messages.Select(m => m.Subject));
+    }
 }
