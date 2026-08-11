@@ -1,6 +1,8 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Linq;
+using System.Windows;
+using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using LEC.App.Services;
 using LEC.MailStore;
@@ -139,11 +141,21 @@ public partial class MessageListViewModel : ObservableObject
     // Só que OpenMessageAsync do DbxStore faz I/O síncrono disfarçado de Task.FromResult, e
     // ExtractSearchableTextAsync opera sobre MemoryStream (também sempre síncrono) -- então sem
     // nenhum ponto de cessão explícito, o loop inteiro rodaria de uma vez, bloqueando a UI até
-    // a pasta inteira ser lida. Task.Yield() resolve isso sem trocar de thread: ele posta a
-    // continuação de volta pro loop de mensagens do WPF via DispatcherSynchronizationContext,
-    // devolvendo o controle pra UI (que processa cliques, renderiza os headers já carregados,
-    // etc.) antes de retomar -- sempre na mesma thread de UI, então o contrato de
-    // single-thread do DbxStore nunca é violado.
+    // a pasta inteira ser lida.
+    //
+    // `await Task.Yield()` NÃO resolve isso, apesar de parecer que sim: numa thread de UI do
+    // WPF ele vira um DispatcherSynchronizationContext.Post, que enfileira a continuação em
+    // DispatcherPriority.Normal (9) -- e Normal é MAIOR prioridade que Render (7), Input (5) e
+    // Background (4). Como cada Task.Yield() já reenfileira a próxima continuação em Normal
+    // antes da iteração seguinte começar, sempre há um item Normal pendente durante todo o
+    // pré-carregamento, e o dispatcher do WPF sempre drena prioridades mais altas primeiro --
+    // então Render e Input nunca ganham a vez. Resultado: LoadAsync até retorna ao chamador,
+    // mas a janela continua sem repintar e sem responder a clique/tecla até a pasta inteira
+    // terminar. Por isso usamos YieldToUiAsync (abaixo) em vez de Task.Yield() puro: ele cede
+    // explicitamente em DispatcherPriority.Background quando há um Dispatcher de verdade
+    // rodando, que é mais baixo que Render/Input e deixa os dois rodarem antes da próxima
+    // mensagem ser processada. Não "simplificar" de volta pra Task.Yield() -- é exatamente o
+    // que já foi tentado e não resolvia o freeze visual.
     private async Task PreloadContentAsync(List<MessageHeader> headers, CancellationTokenSource ownerCts)
     {
         if (headers.Count == 0)
@@ -154,7 +166,7 @@ public partial class MessageListViewModel : ObservableObject
         }
 
         IsContentLoading = true;
-        await Task.Yield(); // deixa LoadAsync retornar ao clique que o disparou antes de qualquer I/O
+        await YieldToUiAsync(); // deixa LoadAsync retornar ao clique que o disparou antes de qualquer I/O
 
         try
         {
@@ -180,7 +192,7 @@ public partial class MessageListViewModel : ObservableObject
                     // mensagem só não aparece em buscas por Conteúdo, resto do app não é afetado.
                 }
 
-                await Task.Yield(); // cede o controle de volta pro laço de mensagens do WPF entre cada mensagem
+                await YieldToUiAsync(); // deixa o WPF repintar/processar input entre cada mensagem
 
                 if (++sinceRefresh >= ContentRefreshBatchSize && ReferenceEquals(_contentLoadCts, ownerCts))
                 {
@@ -201,6 +213,20 @@ public partial class MessageListViewModel : ObservableObject
             if (SearchField == MessageSearchField.Content)
                 ApplyFilter(); // garante um refresh final mesmo com menos de ContentRefreshBatchSize mensagens
         }
+    }
+
+    // Cede o controle pra UI numa prioridade baixa o bastante pra Render/Input rodarem antes da
+    // continuação retomar (ver o comentário acima de PreloadContentAsync sobre por que
+    // Task.Yield() puro não bastava). Sob os testes (xUnit, sem Application/Dispatcher do WPF
+    // rodando), Application.Current é null, então cai pro Task.Yield() simples -- suficiente
+    // pra manter a state machine assíncrona nos testes, sem precisar de um Dispatcher de
+    // verdade bombeando mensagens.
+    private static async Task YieldToUiAsync()
+    {
+        if (Application.Current?.Dispatcher is not null)
+            await Dispatcher.Yield(DispatcherPriority.Background);
+        else
+            await Task.Yield();
     }
 
     private IEnumerable<MessageHeader> Order(IEnumerable<MessageHeader> headers) => _sortColumn switch
