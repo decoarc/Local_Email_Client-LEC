@@ -64,7 +64,6 @@ public partial class MessageListViewModel : ObservableObject
         _contentLoadCts?.Cancel();
         var cts = _contentLoadCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
 
-        _headers.Clear();
         _bodyByMessage.Clear();
         SearchText = string.Empty;
         SearchField = MessageSearchField.Subject;
@@ -127,10 +126,24 @@ public partial class MessageListViewModel : ObservableObject
     // (sequencial -- não paraleliza leituras contra o mesmo arquivo .dbx), em background.
     // Cancelado quando uma nova chamada a LoadAsync assume (ver _contentLoadCts em LoadAsync);
     // o ReferenceEquals abaixo garante que uma execução cancelada nunca mexe em
-    // IsContentLoading/Messages depois que uma execução mais nova já assumiu.
+    // IsContentLoading/_bodyByMessage/Messages depois que uma execução mais nova já assumiu.
+    //
+    // O trabalho bloqueante por mensagem (abrir o arquivo + extrair texto) roda dentro de
+    // Task.Run para sair de fato da thread de UI -- OpenMessageAsync do DbxStore faz I/O
+    // síncrono disfarçado de Task.FromResult, e ExtractSearchableTextAsync opera sobre
+    // MemoryStream (também sempre síncrono), então sem o Task.Run nenhum await neste método
+    // jamais cede de verdade e a pasta inteira seria lida antes de LoadAsync retornar ao
+    // clique que a disparou. Como nenhum ConfigureAwait(false) é usado, a continuação após
+    // o Task.Run volta automaticamente pro contexto original (thread de UI), então as
+    // escritas em _bodyByMessage/IsContentLoading/Messages abaixo continuam de thread única.
     private async Task PreloadContentAsync(List<MessageHeader> headers, CancellationTokenSource ownerCts)
     {
-        if (headers.Count == 0) return;
+        if (headers.Count == 0)
+        {
+            if (ReferenceEquals(_contentLoadCts, ownerCts))
+                IsContentLoading = false;
+            return;
+        }
 
         IsContentLoading = true;
         try
@@ -141,11 +154,17 @@ public partial class MessageListViewModel : ObservableObject
                 ownerCts.Token.ThrowIfCancellationRequested();
                 try
                 {
-                    var stream = await _store.OpenMessageAsync(header.Id, ownerCts.Token);
-                    await using (stream)
+                    string body = await Task.Run(async () =>
                     {
-                        _bodyByMessage[header.Id] = await MessageRenderer.ExtractSearchableTextAsync(stream, ownerCts.Token);
-                    }
+                        var stream = await _store.OpenMessageAsync(header.Id, ownerCts.Token);
+                        await using (stream)
+                        {
+                            return await MessageRenderer.ExtractSearchableTextAsync(stream, ownerCts.Token);
+                        }
+                    }, ownerCts.Token);
+
+                    if (ReferenceEquals(_contentLoadCts, ownerCts))
+                        _bodyByMessage[header.Id] = body;
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
