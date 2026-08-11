@@ -187,11 +187,20 @@ public partial class MainWindow : Window
 
     private void OpenProfile_Click(object sender, RoutedEventArgs e)
     {
+        // The real OpenFolderDialog (IFileOpenDialog + FOS_PICKFOLDERS) never lists files,
+        // by Windows design -- there's no flag that shows files in folder-pick mode. This
+        // uses OpenFileDialog instead, which does show every file, with a placeholder
+        // FileName so the user can just navigate to the right folder and click Abrir
+        // without needing to pick a specific file. If they click on Folders.dbx (or any
+        // file) instead, GetDirectoryName still resolves to the same folder.
         var dialog = new OpenFileDialog
         {
-            Title = "Selecione um arquivo .dbx do perfil (ex: Folders.dbx)",
-            Filter = "Arquivos .dbx (*.dbx)|*.dbx",
-            CheckFileExists = true,
+            Title = "Selecione a pasta do perfil (contendo Folders.dbx) e clique em Abrir",
+            FileName = "Selecionar esta pasta",
+            CheckFileExists = false,
+            CheckPathExists = true,
+            ValidateNames = false,
+            Filter = "Todos os arquivos (*.*)|*.*",
         };
 
         if (dialog.ShowDialog() == true)
