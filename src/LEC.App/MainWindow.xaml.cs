@@ -247,6 +247,7 @@ public partial class MainWindow : Window
                 _selectedNode = node;
                 _selectedTreeView = treeView;
                 await _viewModel.SelectFolderAsync(profile, node);
+                ResetMessageSearchUi();
                 UpdateScavengeButtonVisibility(node);
             }
         }
@@ -552,6 +553,7 @@ public partial class MainWindow : Window
             bool newVisibility = !(_viewModel.CurrentFolderScavengeStatus?.IsVisible ?? false);
             profile.Store.SetScavengeVisibility(node.Folder, newVisibility);
             await _viewModel.SelectFolderAsync(profile, node); // reload the list + refresh status/button state
+            ResetMessageSearchUi();
             UpdateScavengeButtonVisibility(node);
         }
         catch (Exception ex)
@@ -658,19 +660,50 @@ public partial class MainWindow : Window
 
         if (header.Column != SenderColumn && header.Column != DateColumn) return;
 
-        // ApplySortColumn (in MessageListViewModel) does Messages.Clear() then re-adds in the
-        // new order; Clear() raises a CollectionChanged Reset which drops SelectedItems and
-        // blanks the reading pane via MessageListView_SelectionChanged. Capture the selection
-        // here and restore it after the sort so the reorder is transparent to the user.
+        ApplyToMessageListPreservingSelection(() =>
+        {
+            if (header.Column == SenderColumn)
+                messageList.SortBySender();
+            else
+                messageList.SortByDate();
+        });
+    }
+
+    private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_viewModel.MessageList is not { } messageList) return;
+        ApplyToMessageListPreservingSelection(() => messageList.SearchText = SearchBox.Text);
+    }
+
+    private void SearchFieldRadio_Checked(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel.MessageList is not { } messageList) return;
+        if (sender is not RadioButton { Tag: string tag }) return;
+        ApplyToMessageListPreservingSelection(() => messageList.SearchField = Enum.Parse<MessageSearchField>(tag));
+    }
+
+    // MessageListViewModel.Messages.Clear() -- rodado internamente sempre que a ordenação ou
+    // o filtro de busca mudam o que é exibido -- dispara um CollectionChanged Reset, que
+    // derruba ListView.SelectedItems e limpa o painel de leitura via
+    // MessageListView_SelectionChanged. Captura a seleção antes da mudança e restaura depois,
+    // pra ordenar/filtrar ser transparente ao usuário sempre que a mensagem selecionada
+    // continuar aparecendo.
+    private void ApplyToMessageListPreservingSelection(Action applyChange)
+    {
         var selected = MessageListView.SelectedItems.Cast<MessageHeader>().ToList();
-
-        if (header.Column == SenderColumn)
-            messageList.SortBySender();
-        else
-            messageList.SortByDate();
-
+        applyChange();
         foreach (var h in selected)
             MessageListView.SelectedItems.Add(h);
+    }
+
+    // Chamado depois de todo recarregamento da lista de mensagens (troca de pasta ou reload da
+    // mesma pasta após mover/apagar/alternar recuperáveis) -- MessageListViewModel.LoadAsync já
+    // reseta SearchText/SearchField internamente; isso só sincroniza os controles do XAML (que
+    // não são bindados diretamente, ver Task 4) pra refletir esse reset visualmente.
+    private void ResetMessageSearchUi()
+    {
+        SearchBox.Text = string.Empty;
+        SearchFieldSubject.IsChecked = true;
     }
 
     // Resolves which messages a context-menu action or the Delete key should act on: the
@@ -735,7 +768,10 @@ public partial class MainWindow : Window
         // messages showing as stale rows, and retrying the same selection would move (i.e.
         // duplicate) them again.
         if (_selectedProfile is { } profile && _selectedNode is { } node)
+        {
             await _viewModel.SelectFolderAsync(profile, node);
+            ResetMessageSearchUi();
+        }
 
         NavigateToRenderedMessage(string.Empty);
         ImagesBlockedBar.Visibility = Visibility.Collapsed;
@@ -798,7 +834,10 @@ public partial class MainWindow : Window
         // delete call. This must run even when the batch above threw partway through: skipping
         // it would leave already-deleted messages showing as stale rows on screen.
         if (_selectedProfile is { } profile && _selectedNode is { } node)
+        {
             await _viewModel.SelectFolderAsync(profile, node);
+            ResetMessageSearchUi();
+        }
 
         NavigateToRenderedMessage(string.Empty);
         ImagesBlockedBar.Visibility = Visibility.Collapsed;
