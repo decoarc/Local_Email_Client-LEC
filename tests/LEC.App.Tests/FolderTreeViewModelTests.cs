@@ -106,4 +106,64 @@ public class FolderTreeViewModelTests
         Assert.True(vm.RootNodes.Single(n => n.DisplayName == "Caixa de entrada").IsSpecial);
         Assert.False(vm.RootNodes.Single(n => n.DisplayName == "Enviados 2004").IsSpecial);
     }
+
+    [Fact]
+    public void RebuildingPreservesWhichExistingNodesWereExpanded()
+    {
+        var folders = new[]
+        {
+            Folder(1, null, "Pastas locais"),
+            Folder(2, 1, "Caixa de entrada"),
+            Folder(3, 2, "Sub-pasta"),
+        };
+
+        var vm = new FolderTreeViewModel();
+        vm.Build(folders);
+
+        var root = vm.RootNodes.Single();
+        var inbox = root.Children.Single();
+        root.IsExpanded = true;
+        inbox.IsExpanded = true;
+
+        // Build() always replaces every node with a brand-new instance, even when
+        // nothing about that particular folder changed -- a rename or unrelated
+        // sibling edit rebuilds the whole tree. The new instances must inherit the
+        // expansion state of the old ones they replace, or every subfolder the user
+        // had open collapses on every folder create/delete/move.
+        vm.Build(folders);
+
+        var rebuiltRoot = vm.RootNodes.Single();
+        var rebuiltInbox = rebuiltRoot.Children.Single();
+        var rebuiltSub = rebuiltInbox.Children.Single();
+
+        Assert.True(rebuiltRoot.IsExpanded);
+        Assert.True(rebuiltInbox.IsExpanded);
+        Assert.False(rebuiltSub.IsExpanded);
+    }
+
+    [Fact]
+    public void NewlyAddedFoldersStartCollapsedEvenWhenSiblingsWereExpanded()
+    {
+        var folders = new[]
+        {
+            Folder(1, null, "Pastas locais"),
+            Folder(2, 1, "Caixa de entrada"),
+        };
+
+        var vm = new FolderTreeViewModel();
+        vm.Build(folders);
+        vm.RootNodes.Single().IsExpanded = true;
+
+        var withNewSubfolder = new[]
+        {
+            Folder(1, null, "Pastas locais"),
+            Folder(2, 1, "Caixa de entrada"),
+            Folder(3, 1, "Nova pasta"),
+        };
+        vm.Build(withNewSubfolder);
+
+        var root = vm.RootNodes.Single();
+        Assert.True(root.IsExpanded);
+        Assert.False(root.Children.Single(n => n.DisplayName == "Nova pasta").IsExpanded);
+    }
 }

@@ -9,6 +9,9 @@ public partial class FolderNodeViewModel : ObservableObject
     public StoreFolder Folder { get; }
     public ObservableCollection<FolderNodeViewModel> Children { get; } = new();
 
+    [ObservableProperty]
+    private bool isExpanded;
+
     public FolderNodeViewModel(StoreFolder folder) => Folder = folder;
 
     public string DisplayName => Folder.Name;

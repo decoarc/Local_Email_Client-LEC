@@ -10,11 +10,19 @@ public partial class FolderTreeViewModel : ObservableObject
 
     public void Build(IReadOnlyList<StoreFolder> folders)
     {
+        // Build() always replaces every node with a brand-new instance, even for
+        // folders untouched by whatever change triggered this rebuild -- the WPF
+        // TreeView tracks expanded/collapsed state per item instance, so without this
+        // every subfolder the user had open would collapse on any folder create,
+        // delete, or move.
+        var expandedIds = new HashSet<int>();
+        CollectExpandedIds(RootNodes, expandedIds);
+
         RootNodes.Clear();
 
         var nodesById = new Dictionary<int, FolderNodeViewModel>();
         foreach (var folder in folders)
-            nodesById[folder.Id] = new FolderNodeViewModel(folder);
+            nodesById[folder.Id] = new FolderNodeViewModel(folder) { IsExpanded = expandedIds.Contains(folder.Id) };
 
         foreach (var folder in folders)
         {
@@ -51,6 +59,17 @@ public partial class FolderTreeViewModel : ObservableObject
         {
             if (!reached.Contains(folder.Id))
                 RootNodes.Add(nodesById[folder.Id]);
+        }
+    }
+
+    private static void CollectExpandedIds(IEnumerable<FolderNodeViewModel> nodes, HashSet<int> expandedIds)
+    {
+        foreach (var node in nodes)
+        {
+            if (node.IsExpanded)
+                expandedIds.Add(node.Folder.Id);
+
+            CollectExpandedIds(node.Children, expandedIds);
         }
     }
 }
