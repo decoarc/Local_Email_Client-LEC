@@ -24,6 +24,13 @@ public partial class FolderTreeViewModel : ObservableObject
         foreach (var folder in folders)
             nodesById[folder.Id] = new FolderNodeViewModel(folder) { IsExpanded = expandedIds.Contains(folder.Id) };
 
+        // Children are grouped per parent (instead of added straight to the
+        // ObservableCollection tree) so each sibling group can be sorted as a whole
+        // before anything is added to RootNodes/Children -- sorting after the fact
+        // would mean re-adding every node anyway.
+        var childrenByParentId = new Dictionary<int, List<FolderNodeViewModel>>();
+        var roots = new List<FolderNodeViewModel>();
+
         foreach (var folder in folders)
         {
             var node = nodesById[folder.Id];
@@ -31,34 +38,55 @@ public partial class FolderTreeViewModel : ObservableObject
             // A ParentId that doesn't resolve to a known folder (root sentinel already
             // mapped to null by DbxStore, or a genuine dangling reference like the real
             // profile's folder 73 -> 53) becomes a top-level node.
-            if (folder.ParentId is int parentId && nodesById.TryGetValue(parentId, out var parentNode))
-                parentNode.Children.Add(node);
+            if (folder.ParentId is int parentId && nodesById.ContainsKey(parentId))
+            {
+                if (!childrenByParentId.TryGetValue(parentId, out var siblings))
+                    childrenByParentId[parentId] = siblings = new List<FolderNodeViewModel>();
+                siblings.Add(node);
+            }
             else
-                RootNodes.Add(node);
+            {
+                roots.Add(node);
+            }
         }
 
         // A folder whose ParentId participates in a cycle (self-reference, or A -> B -> A)
         // resolves successfully as a child of its cycle-mate above and never reaches
-        // RootNodes via the pass that just ran -- it isn't dropped by a crash, it's dropped
+        // roots via the pass that just ran -- it isn't dropped by a crash, it's dropped
         // by silently succeeding in the wrong way. Sweep for any node unreachable from an
         // actual root and surface it as a root too, so a cycle degrades into "extra
         // top-level folders" instead of "folder vanished".
         var reached = new HashSet<int>();
-        var stack = new Stack<FolderNodeViewModel>(RootNodes);
+        var stack = new Stack<FolderNodeViewModel>(roots);
         while (stack.Count > 0)
         {
             var current = stack.Pop();
             if (!reached.Add(current.Folder.Id))
                 continue;
 
-            foreach (var child in current.Children)
-                stack.Push(child);
+            if (childrenByParentId.TryGetValue(current.Folder.Id, out var siblings))
+                foreach (var child in siblings)
+                    stack.Push(child);
         }
 
         foreach (var folder in folders)
         {
             if (!reached.Contains(folder.Id))
-                RootNodes.Add(nodesById[folder.Id]);
+                roots.Add(nodesById[folder.Id]);
+        }
+
+        // Sorted last, once each sibling group (including cycle-promoted extra roots)
+        // is fully assembled -- special folders first in a fixed order, then the rest
+        // alphanumerically. See FolderSortOrder.
+        roots.Sort(FolderSortOrder.Compare);
+        foreach (var root in roots)
+            RootNodes.Add(root);
+
+        foreach (var (parentId, siblings) in childrenByParentId)
+        {
+            siblings.Sort(FolderSortOrder.Compare);
+            foreach (var child in siblings)
+                nodesById[parentId].Children.Add(child);
         }
     }
 

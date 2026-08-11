@@ -166,4 +166,95 @@ public class FolderTreeViewModelTests
         Assert.True(root.IsExpanded);
         Assert.False(root.Children.Single(n => n.DisplayName == "Nova pasta").IsExpanded);
     }
+
+    [Fact]
+    public void SortsSpecialFoldersFirstInFixedOrderRegardlessOfInputOrder()
+    {
+        var folders = new[]
+        {
+            new StoreFolder { Id = 1, ParentId = null, Name = "Itens excluídos", IsLoadable = true, HasBackingFile = true, SpecialFolderKind = SpecialFolderKind.DeletedItems },
+            new StoreFolder { Id = 2, ParentId = null, Name = "Itens enviados", IsLoadable = true, HasBackingFile = true, SpecialFolderKind = SpecialFolderKind.SentItems },
+            new StoreFolder { Id = 3, ParentId = null, Name = "Caixa de saída", IsLoadable = true, HasBackingFile = true, SpecialFolderKind = SpecialFolderKind.Outbox },
+            new StoreFolder { Id = 4, ParentId = null, Name = "Rascunho", IsLoadable = true, HasBackingFile = true, SpecialFolderKind = SpecialFolderKind.Drafts },
+            new StoreFolder { Id = 5, ParentId = null, Name = "Caixa de entrada", IsLoadable = true, HasBackingFile = true, SpecialFolderKind = SpecialFolderKind.Inbox },
+        };
+
+        var vm = new FolderTreeViewModel();
+        vm.Build(folders);
+
+        Assert.Equal(
+            new[] { "Caixa de entrada", "Rascunho", "Caixa de saída", "Itens enviados", "Itens excluídos" },
+            vm.RootNodes.Select(n => n.DisplayName));
+    }
+
+    [Fact]
+    public void SortsOrdinaryFoldersAlphabeticallyAfterSpecials()
+    {
+        var folders = new[]
+        {
+            new StoreFolder { Id = 1, ParentId = null, Name = "Zebra", IsLoadable = true, HasBackingFile = true },
+            new StoreFolder { Id = 2, ParentId = null, Name = "Árvore", IsLoadable = true, HasBackingFile = true },
+            new StoreFolder { Id = 3, ParentId = null, Name = "banana", IsLoadable = true, HasBackingFile = true },
+            new StoreFolder { Id = 4, ParentId = null, Name = "Caixa de entrada", IsLoadable = true, HasBackingFile = true, SpecialFolderKind = SpecialFolderKind.Inbox },
+        };
+
+        var vm = new FolderTreeViewModel();
+        vm.Build(folders);
+
+        // "Caixa de entrada" ordenaria depois de "Árvore" alfabeticamente, mas é
+        // especial -- o rank de especial tem prioridade sobre a ordem alfabética.
+        Assert.Equal(
+            new[] { "Caixa de entrada", "Árvore", "banana", "Zebra" },
+            vm.RootNodes.Select(n => n.DisplayName));
+    }
+
+    [Fact]
+    public void SortsNumberedFoldersNaturallyNotLexically()
+    {
+        var folders = new[]
+        {
+            new StoreFolder { Id = 1, ParentId = null, Name = "Pasta 10", IsLoadable = true, HasBackingFile = true },
+            new StoreFolder { Id = 2, ParentId = null, Name = "Pasta 2", IsLoadable = true, HasBackingFile = true },
+            new StoreFolder { Id = 3, ParentId = null, Name = "Pasta 1", IsLoadable = true, HasBackingFile = true },
+        };
+
+        var vm = new FolderTreeViewModel();
+        vm.Build(folders);
+
+        Assert.Equal(
+            new[] { "Pasta 1", "Pasta 2", "Pasta 10" },
+            vm.RootNodes.Select(n => n.DisplayName));
+    }
+
+    [Fact]
+    public void SortingAppliesToSubfoldersToo()
+    {
+        var folders = new[]
+        {
+            Folder(1, null, "Pastas locais"),
+            Folder(2, 1, "Zebra"),
+            Folder(3, 1, "Amora"),
+        };
+
+        var vm = new FolderTreeViewModel();
+        vm.Build(folders);
+
+        var root = vm.RootNodes.Single();
+        Assert.Equal(new[] { "Amora", "Zebra" }, root.Children.Select(n => n.DisplayName));
+    }
+
+    [Fact]
+    public void CyclePromotedRootsAreSortedTogetherWithOrdinaryRoots()
+    {
+        var folders = new[]
+        {
+            Folder(1, 2, "Zebra"),
+            Folder(2, 1, "Amora"),
+        };
+
+        var vm = new FolderTreeViewModel();
+        vm.Build(folders);
+
+        Assert.Equal(new[] { "Amora", "Zebra" }, vm.RootNodes.Select(n => n.DisplayName));
+    }
 }
