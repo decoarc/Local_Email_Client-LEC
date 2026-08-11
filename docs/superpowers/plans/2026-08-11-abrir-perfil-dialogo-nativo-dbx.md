@@ -29,7 +29,7 @@
 - Consumes: `Microsoft.Win32.OpenFileDialog` (already available — `using Microsoft.Win32;` and `using System.IO;` are already present at the top of `MainWindow.xaml.cs`, no new usings needed).
 - Produces: nothing consumed by later tasks — this plan has one task.
 
-No automated test is possible or needed for this task: `OpenProfile_Click` only constructs and shows a native dialog, with no non-trivial logic to unit test (same limitation already documented for WPF window code in the superseded design). Verification is build success, full test suite passing (proving no leftover references to the deleted files), and the manual GUI checklist in Step 5.
+No automated test is possible or needed for this task: `OpenProfile_Click` only constructs and shows a native dialog, with no non-trivial logic to unit test (same limitation already documented for WPF window code in the superseded design). Verification is build success, full test suite passing (proving no leftover references to the deleted files), and the manual GUI checklist in Step 6.
 
 - [ ] **Step 1: Replace `OpenProfile_Click`**
 
