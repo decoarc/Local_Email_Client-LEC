@@ -13,4 +13,13 @@ public sealed class MessageHeader
     public string? MessageId { get; init; }
     public StoreHealth Health { get; init; }
     public RecoveredMessageKind? RecoveredKind { get; init; } // null = normal, index-backed message
+
+    /// <summary>
+    /// null = ainda não verificado (o pré-carregamento de MessageListViewModel não chegou nesta
+    /// mensagem ainda, ou a mensagem falhou ao parsear); true/false = resultado real de um parse
+    /// MIME. Diferente dos demais campos desta classe (todos vêm prontos do índice .dbx em
+    /// EnumerateHeadersAsync), este é preenchido depois, em background -- por isso é mutável
+    /// (set), não init.
+    /// </summary>
+    public bool? HasAttachment { get; set; }
 }

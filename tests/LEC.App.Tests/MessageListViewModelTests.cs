@@ -3,6 +3,7 @@ using System.Linq;
 using System.Text;
 using LEC.App.ViewModels;
 using LEC.MailStore;
+using MimeKit;
 using Xunit;
 
 namespace LEC.App.Tests;
@@ -20,6 +21,7 @@ public class MessageListViewModelTests
 
         var vm = new MessageListViewModel(store);
         await vm.LoadAsync(folder);
+        await vm.ContentLoadTask;
 
         Assert.Single(vm.Messages);
         Assert.Equal("Ola", vm.Messages[0].Subject);
@@ -53,9 +55,11 @@ public class MessageListViewModelTests
 
         var vm = new MessageListViewModel(store);
         await vm.LoadAsync(folderA);
+        await vm.ContentLoadTask;
         Assert.Single(vm.Messages);
 
         await vm.LoadAsync(folderB);
+        await vm.ContentLoadTask;
         Assert.Empty(vm.Messages);
     }
 
@@ -72,6 +76,7 @@ public class MessageListViewModelTests
 
         var vm = new MessageListViewModel(store);
         await vm.LoadAsync(folder);
+        await vm.ContentLoadTask;
 
         Assert.Equal(new[] { "Novo", "Antigo", "SemData" }, vm.Messages.Select(m => m.Subject));
     }
@@ -90,6 +95,7 @@ public class MessageListViewModelTests
 
         var vm = new MessageListViewModel(store);
         await vm.LoadAsync(folder);
+        await vm.ContentLoadTask;
 
         vm.SortBySender();
 
@@ -113,6 +119,7 @@ public class MessageListViewModelTests
 
         var vm = new MessageListViewModel(store);
         await vm.LoadAsync(folder);
+        await vm.ContentLoadTask;
 
         vm.SortBySender();
         vm.SortBySender();
@@ -133,6 +140,7 @@ public class MessageListViewModelTests
 
         var vm = new MessageListViewModel(store);
         await vm.LoadAsync(folder); // default: Date descendente (mais recente primeiro)
+        await vm.ContentLoadTask;
 
         vm.SortByDate(); // mesma coluna já ativa -> inverte
 
@@ -153,6 +161,7 @@ public class MessageListViewModelTests
 
         var vm = new MessageListViewModel(store);
         await vm.LoadAsync(folder);
+        await vm.ContentLoadTask;
 
         vm.SortByDate();   // Date -> ascendente (mais antiga primeiro)
         vm.SortByDate();   // Date -> descendente (mais recente primeiro)
@@ -182,9 +191,11 @@ public class MessageListViewModelTests
 
         var vm = new MessageListViewModel(store);
         await vm.LoadAsync(folderA);
+        await vm.ContentLoadTask;
         vm.SortBySender();
 
         await vm.LoadAsync(folderB);
+        await vm.ContentLoadTask;
 
         Assert.Equal(new[] { "B-Alfa", "B-Bravo" }, vm.Messages.Select(m => m.Subject));
         Assert.Equal("De ▲", vm.SenderColumnHeader);
@@ -202,6 +213,7 @@ public class MessageListViewModelTests
 
         var vm = new MessageListViewModel(store);
         await vm.LoadAsync(folder);
+        await vm.ContentLoadTask;
 
         vm.SearchField = MessageSearchField.Sender;
         vm.SearchText = "JOAO";
@@ -221,6 +233,7 @@ public class MessageListViewModelTests
 
         var vm = new MessageListViewModel(store);
         await vm.LoadAsync(folder); // SearchField já começa em Subject por padrão
+        await vm.ContentLoadTask;
 
         vm.SearchText = "RELATORIO";
 
@@ -239,6 +252,7 @@ public class MessageListViewModelTests
 
         var vm = new MessageListViewModel(store);
         await vm.LoadAsync(folder);
+        await vm.ContentLoadTask;
 
         vm.SearchField = MessageSearchField.Sender;
         vm.SearchText = "Alfa";
@@ -262,6 +276,7 @@ public class MessageListViewModelTests
 
         var vm = new MessageListViewModel(store);
         await vm.LoadAsync(folder);
+        await vm.ContentLoadTask;
         vm.SearchText = "Ana";
 
         vm.SearchField = MessageSearchField.Sender;
@@ -286,10 +301,12 @@ public class MessageListViewModelTests
 
         var vm = new MessageListViewModel(store);
         await vm.LoadAsync(folderA);
+        await vm.ContentLoadTask;
         vm.SearchField = MessageSearchField.Sender;
         vm.SearchText = "Alfa";
 
         await vm.LoadAsync(folderB);
+        await vm.ContentLoadTask;
 
         Assert.Equal(string.Empty, vm.SearchText);
         Assert.Equal(MessageSearchField.Subject, vm.SearchField);
@@ -309,6 +326,7 @@ public class MessageListViewModelTests
 
         var vm = new MessageListViewModel(store);
         await vm.LoadAsync(folder);
+        await vm.ContentLoadTask;
         vm.SearchText = "Relatorio"; // SearchField padrão = Subject
 
         vm.SortBySender();
@@ -504,5 +522,82 @@ public class MessageListViewModelTests
         vm.SearchField = MessageSearchField.Subject;
         vm.SearchText = "Corrompida";
         Assert.Single(vm.Messages);
+    }
+
+    [Fact]
+    public async Task PopulatesHasAttachmentTrueForAMessageWithARealAttachment()
+    {
+        var folder = new StoreFolder { Id = 1, Name = "Caixa de entrada", IsLoadable = true, HasBackingFile = true };
+        var header = new MessageHeader { Id = new MessageRef(1, 1), Subject = "Com anexo" };
+
+        var builder = new BodyBuilder { HtmlBody = "<p>Ola</p>" };
+        builder.Attachments.Add("relatorio.txt", Encoding.ASCII.GetBytes("conteudo"), ContentType.Parse("text/plain"));
+        var message = new MimeMessage();
+        message.From.Add(new MailboxAddress("Ana", "ana@example.com"));
+        message.Body = builder.ToMessageBody();
+        var rawStream = new MemoryStream();
+        message.WriteTo(rawStream);
+
+        var store = new FakeMailStore(
+            folders: new[] { folder },
+            headersByFolder: new() { [1] = new() { header } },
+            rawByRef: new() { [header.Id] = rawStream.ToArray() });
+
+        var vm = new MessageListViewModel(store);
+        await vm.LoadAsync(folder);
+        await vm.ContentLoadTask;
+
+        Assert.True(vm.Messages.Single().HasAttachment);
+    }
+
+    [Fact]
+    public async Task PopulatesHasAttachmentFalseForAMessageWithoutAnAttachment()
+    {
+        var folder = new StoreFolder { Id = 1, Name = "Caixa de entrada", IsLoadable = true, HasBackingFile = true };
+        var header = new MessageHeader { Id = new MessageRef(1, 1), Subject = "Sem anexo" };
+        var store = new FakeMailStore(
+            folders: new[] { folder },
+            headersByFolder: new() { [1] = new() { header } },
+            rawByRef: new() { [header.Id] = Encoding.ASCII.GetBytes("From: a@b.com\r\nSubject: X\r\n\r\nCorpo sem anexo") });
+
+        var vm = new MessageListViewModel(store);
+        await vm.LoadAsync(folder);
+        await vm.ContentLoadTask;
+
+        Assert.False(vm.Messages.Single().HasAttachment);
+    }
+
+    [Fact]
+    public async Task HasAttachmentStaysNullForAMessageWhoseBodyFailsToLoad()
+    {
+        var folder = new StoreFolder { Id = 1, Name = "Caixa de entrada", IsLoadable = true, HasBackingFile = true };
+        var header = new MessageHeader { Id = new MessageRef(1, 1), Subject = "Corrompida" };
+        var store = new FakeMailStore(
+            folders: new[] { folder },
+            headersByFolder: new() { [1] = new() { header } });
+        // Nenhum rawByRef registrado para este MessageRef -- OpenMessageAsync do FakeMailStore
+        // lança InvalidOperationException, simulando um corpo ilegível/corrompido.
+
+        var vm = new MessageListViewModel(store);
+        await vm.LoadAsync(folder);
+        await vm.ContentLoadTask;
+
+        Assert.Null(vm.Messages.Single().HasAttachment);
+    }
+
+    [Fact]
+    public async Task HasAttachmentIsNullForEveryMessageBeforePreloadCompletes()
+    {
+        var folder = new StoreFolder { Id = 1, Name = "Caixa de entrada", IsLoadable = true, HasBackingFile = true };
+        var header = new MessageHeader { Id = new MessageRef(1, 1), Subject = "A" };
+        var store = new FakeMailStore(
+            folders: new[] { folder },
+            headersByFolder: new() { [1] = new() { header } },
+            rawByRef: new() { [header.Id] = Encoding.ASCII.GetBytes("From: a@b.com\r\nSubject: X\r\n\r\nCorpo") });
+
+        var vm = new MessageListViewModel(store);
+        await vm.LoadAsync(folder); // não espera ContentLoadTask de propósito
+
+        Assert.Null(vm.Messages.Single().HasAttachment);
     }
 }

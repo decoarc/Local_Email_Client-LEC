@@ -171,7 +171,7 @@ public partial class MessageListViewModel : ObservableObject
     // seguinte seria uma corrida de verdade contra esses dicionários.
     //
     // Só que OpenMessageAsync do DbxStore faz I/O síncrono disfarçado de Task.FromResult, e
-    // ExtractSearchableTextAsync opera sobre MemoryStream (também sempre síncrono) -- então sem
+    // ExtractListMetadataAsync opera sobre MemoryStream (também sempre síncrono) -- então sem
     // nenhum ponto de cessão explícito, o loop inteiro rodaria de uma vez, bloqueando a UI até
     // a pasta inteira ser lida.
     //
@@ -210,18 +210,23 @@ public partial class MessageListViewModel : ObservableObject
                 {
                     var stream = await _store.OpenMessageAsync(header.Id, ownerCts.Token);
                     string body;
+                    bool hasAttachment;
                     await using (stream)
                     {
-                        (body, _) = await MessageRenderer.ExtractListMetadataAsync(stream, ownerCts.Token);
+                        (body, hasAttachment) = await MessageRenderer.ExtractListMetadataAsync(stream, ownerCts.Token);
                     }
 
                     if (ReferenceEquals(_contentLoadCts, ownerCts))
+                    {
                         _bodyByMessage[header.Id] = body;
+                        header.HasAttachment = hasAttachment;
+                    }
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     // Corpo ilegível (MIME corrompido/truncado, ou I/O falhou) -- degrada:
-                    // mensagem só não aparece em buscas por Conteúdo, resto do app não é afetado.
+                    // mensagem só não aparece em buscas por Conteúdo nem ganha ícone de anexo,
+                    // resto do app não é afetado. HasAttachment fica null (nunca setado).
                 }
 
                 await YieldToUiAsync(); // deixa o WPF repintar/processar input entre cada mensagem
@@ -229,8 +234,9 @@ public partial class MessageListViewModel : ObservableObject
                 if (++sinceRefresh >= ContentRefreshBatchSize && ReferenceEquals(_contentLoadCts, ownerCts))
                 {
                     sinceRefresh = 0;
-                    if (SearchField == MessageSearchField.Content)
-                        ApplyFilter();
+                    ApplyFilter(); // sempre -- não só quando SearchField == Content -- pra refletir
+                                    // header.HasAttachment (coluna de anexo) progressivamente, não só
+                                    // resultados de busca por Conteúdo
                 }
             }
         }
@@ -242,8 +248,8 @@ public partial class MessageListViewModel : ObservableObject
         if (ReferenceEquals(_contentLoadCts, ownerCts))
         {
             IsContentLoading = false;
-            if (SearchField == MessageSearchField.Content)
-                ApplyFilter(); // garante um refresh final mesmo com menos de ContentRefreshBatchSize mensagens
+            ApplyFilter(); // idem -- refresh final sempre, garante o último lote (< ContentRefreshBatchSize)
+                            // de HasAttachment/corpo pesquisável apareça mesmo em pastas pequenas
         }
     }
 
