@@ -117,7 +117,7 @@ public static class MessageRenderer
     }
 
     // Bufferiza os bytes brutos antes de tentar parsear -- assim, RenderAsync e
-    // ExtractSearchableTextAsync conseguem cair pro texto bruto como fallback mesmo quando o
+    // ExtractListMetadataAsync conseguem cair pro texto bruto como fallback mesmo quando o
     // parse falha, sem precisar reler o stream (que pode não ser buscável/reutilizável).
     private static async Task<byte[]> ReadAllBytesAsync(Stream stream, CancellationToken ct)
     {
@@ -173,25 +173,34 @@ public static class MessageRenderer
     private static readonly Regex HtmlTagRegex = new(@"<[^>]+>", RegexOptions.Compiled);
 
     /// <summary>
-    /// Extrai um texto pesquisável do corpo da mensagem, pra uso da busca por "Conteúdo" em
-    /// MessageListViewModel -- nunca lança: mensagem que falha ao parsear cai pro mesmo
-    /// fallback de bytes brutos que RenderAsync usa pra exibição.
+    /// Extrai, num único parse MIME, o texto pesquisável do corpo (pra busca por "Conteúdo") e
+    /// se a mensagem tem pelo menos um anexo real (pra coluna de anexo da lista) --
+    /// MessageListViewModel.PreloadContentAsync usa os dois de uma vez, pra não parsear a
+    /// mesma mensagem duas vezes. Nunca lança: mensagem que falha ao parsear cai pro mesmo
+    /// fallback de bytes brutos que RenderAsync usa pra exibição, com HasAttachment = false
+    /// (não dá pra saber -- mesma política de "trata como não sabido" do resto do app).
     /// </summary>
-    public static async Task<string> ExtractSearchableTextAsync(Stream rawMessage, CancellationToken ct = default)
+    public static async Task<(string SearchableText, bool HasAttachment)> ExtractListMetadataAsync(
+        Stream rawMessage, CancellationToken ct = default)
     {
         byte[] raw = await ReadAllBytesAsync(rawMessage, ct);
         MimeMessage? message = await TryParseAsync(raw, ct);
 
         if (message is null)
-            return Encoding.Latin1.GetString(raw);
+            return (Encoding.Latin1.GetString(raw), false);
 
-        if (message.TextBody is { } text)
-            return text;
+        string text = message.TextBody is { } plain
+            ? plain
+            : message.HtmlBody is { } html
+                ? WebUtility.HtmlDecode(HtmlTagRegex.Replace(html, " "))
+                : string.Empty;
 
-        if (message.HtmlBody is { } html)
-            return WebUtility.HtmlDecode(HtmlTagRegex.Replace(html, " "));
+        // Mesmo critério (ContentDisposition?.IsAttachment via MimeMessage.Attachments) e mesmo
+        // filtro OfType<MimePart> que ExtractAttachments já usa pro painel de leitura, logo
+        // abaixo neste arquivo -- mesmas lacunas conhecidas documentadas ali, nenhuma heurística nova.
+        bool hasAttachment = message.Attachments.OfType<MimePart>().Any();
 
-        return string.Empty;
+        return (text, hasAttachment);
     }
 
     // MimeMessage.Attachments é puramente baseado em ContentDisposition?.IsAttachment -- não

@@ -336,7 +336,7 @@ public class MessageRendererTests
     }
 
     [Fact]
-    public async Task ExtractSearchableTextAsyncReturnsThePlainTextBodyWhenPresent()
+    public async Task ExtractListMetadataAsyncReturnsThePlainTextBodyWhenPresent()
     {
         string raw =
             "From: ana@example.com\r\n" +
@@ -344,13 +344,14 @@ public class MessageRendererTests
             "\r\n" +
             "Corpo em texto puro";
 
-        string text = await MessageRenderer.ExtractSearchableTextAsync(RawMessage(raw));
+        var (text, hasAttachment) = await MessageRenderer.ExtractListMetadataAsync(RawMessage(raw));
 
         Assert.Contains("Corpo em texto puro", text);
+        Assert.False(hasAttachment);
     }
 
     [Fact]
-    public async Task ExtractSearchableTextAsyncStripsHtmlTagsWhenThereIsNoTextBody()
+    public async Task ExtractListMetadataAsyncStripsHtmlTagsWhenThereIsNoTextBody()
     {
         string raw =
             "From: ana@example.com\r\n" +
@@ -359,16 +360,17 @@ public class MessageRendererTests
             "\r\n" +
             "<p>Corpo <b>em HTML</b></p>";
 
-        string text = await MessageRenderer.ExtractSearchableTextAsync(RawMessage(raw));
+        var (text, hasAttachment) = await MessageRenderer.ExtractListMetadataAsync(RawMessage(raw));
 
         Assert.Contains("Corpo", text);
         Assert.Contains("em HTML", text);
         Assert.DoesNotContain("<p>", text);
         Assert.DoesNotContain("<b>", text);
+        Assert.False(hasAttachment);
     }
 
     [Fact]
-    public async Task ExtractSearchableTextAsyncFallsBackToRawBytesWhenTheMessageFailsToParse()
+    public async Task ExtractListMetadataAsyncFallsBackToRawBytesWhenTheMessageFailsToParse()
     {
         // Mesmo cabeçalho usado por FallsBackToRawTextInsteadOfThrowingWhenHeadersAreNotRfcCompliant
         // acima -- header com espaço no nome do campo, que o parser estrito do MimeKit rejeita.
@@ -377,8 +379,50 @@ public class MessageRendererTests
             "\r\n" +
             "Corpo da mensagem sem parse";
 
-        string text = await MessageRenderer.ExtractSearchableTextAsync(RawMessage(raw));
+        var (text, hasAttachment) = await MessageRenderer.ExtractListMetadataAsync(RawMessage(raw));
 
         Assert.Contains("Corpo da mensagem sem parse", text);
+        Assert.False(hasAttachment);
+    }
+
+    [Fact]
+    public async Task ExtractListMetadataAsyncReportsHasAttachmentTrueWhenTheMessageHasARealAttachment()
+    {
+        var builder = new BodyBuilder { HtmlBody = "<p>Ola</p>" };
+        builder.Attachments.Add("relatorio.txt", Encoding.ASCII.GetBytes("conteudo do anexo"), ContentType.Parse("text/plain"));
+
+        var message = new MimeMessage();
+        message.From.Add(new MailboxAddress("Ana", "ana@example.com"));
+        message.Subject = "Com anexo";
+        message.Body = builder.ToMessageBody();
+
+        var stream = new MemoryStream();
+        message.WriteTo(stream);
+        stream.Position = 0;
+
+        var (_, hasAttachment) = await MessageRenderer.ExtractListMetadataAsync(stream);
+
+        Assert.True(hasAttachment);
+    }
+
+    [Fact]
+    public async Task ExtractListMetadataAsyncReportsHasAttachmentFalseWhenTheMessageHasOnlyACidEmbeddedImage()
+    {
+        var builder = new BodyBuilder { HtmlBody = "<p>Ola <img src=\"cid:logo123\"></p>" };
+        var embeddedImage = (MimePart)builder.LinkedResources.Add("logo.png", new byte[] { 1, 2, 3 }, ContentType.Parse("image/png"));
+        embeddedImage.ContentId = "logo123";
+
+        var message = new MimeMessage();
+        message.From.Add(new MailboxAddress("Ana", "ana@example.com"));
+        message.Subject = "Sem anexo real";
+        message.Body = builder.ToMessageBody();
+
+        var stream = new MemoryStream();
+        message.WriteTo(stream);
+        stream.Position = 0;
+
+        var (_, hasAttachment) = await MessageRenderer.ExtractListMetadataAsync(stream);
+
+        Assert.False(hasAttachment);
     }
 }

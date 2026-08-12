@@ -212,7 +212,7 @@ public partial class MessageListViewModel : ObservableObject
                     string body;
                     await using (stream)
                     {
-                        body = await MessageRenderer.ExtractSearchableTextAsync(stream, ownerCts.Token);
+                        (body, _) = await MessageRenderer.ExtractListMetadataAsync(stream, ownerCts.Token);
                     }
 
                     if (ReferenceEquals(_contentLoadCts, ownerCts))
