@@ -73,6 +73,14 @@ public partial class MainWindow : Window
 
             var core = ReaderWebView.CoreWebView2;
 
+            // Chromium's auto dark mode repaints pages that don't declare their own
+            // color-scheme -- including the blank "nothing selected" page and plain-text
+            // messages the renderer doesn't wrap in styled HTML -- using the OS theme. Under
+            // Windows dark mode that can flip the pane dark while leaving message text
+            // (e.g. inline color:black) unchanged, making it unreadable. Pin the profile to
+            // light so the reading pane always renders as a normal white page.
+            core.Profile.PreferredColorScheme = Microsoft.Web.WebView2.Core.CoreWebView2PreferredColorScheme.Light;
+
             // This is a local reader for old mail, not a general browser: no script
             // execution, no script-driven side channels (postMessage, JS dialogs).
             core.Settings.IsScriptEnabled = false;
