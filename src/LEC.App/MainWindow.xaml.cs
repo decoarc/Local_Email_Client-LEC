@@ -66,6 +66,11 @@ public partial class MainWindow : Window
         {
             await ReaderWebView.EnsureCoreWebView2Async();
 
+            // Empty NavigateToString("") has no <html>/<body> to color, so WebView2 falls
+            // back to its own default background -- black when the OS is in dark mode.
+            // Force white so the "nothing selected" state matches a normal rendered message.
+            ReaderWebView.DefaultBackgroundColor = System.Drawing.Color.White;
+
             var core = ReaderWebView.CoreWebView2;
 
             // This is a local reader for old mail, not a general browser: no script
