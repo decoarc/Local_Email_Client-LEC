@@ -586,7 +586,18 @@ public class MessageListViewModelTests
     }
 
     [Fact]
-    public async Task HasAttachmentIsNullForEveryMessageBeforePreloadCompletes()
+    // Não usa async Task + "await vm.LoadAsync(folder) sem esperar ContentLoadTask" (como
+    // tentado antes) -- isso dependia de sorte de agendamento do ThreadPool pra Task.Yield()
+    // dentro de PreloadContentAsync/YieldToUiAsync não ter rodado ainda no instante do Assert.
+    // Passava sempre isolado, mas falhou de verdade rodando a suíte inteira (mais contenção no
+    // ThreadPool aumenta a chance da continuação do Yield rodar antes da asserção) -- exatamente
+    // a mesma classe de bug que ManualPumpSynchronizationContext existe pra evitar em
+    // SwitchingFoldersMidPreloadNeverLeaksThePreviousFoldersBodiesIntoTheNewFolder, abaixo.
+    // Usa o mesmo mecanismo aqui: com o pump instalado, a continuação pós-Yield fica só
+    // enfileirada (nunca despachada pro ThreadPool de verdade) até o teste mandar rodar --
+    // então "não pumpar nada" garante deterministicamente que o loop de background ainda não
+    // tocou em nenhum header.
+    public void HasAttachmentIsNullForEveryMessageBeforePreloadCompletes()
     {
         var folder = new StoreFolder { Id = 1, Name = "Caixa de entrada", IsLoadable = true, HasBackingFile = true };
         var header = new MessageHeader { Id = new MessageRef(1, 1), Subject = "A" };
@@ -596,8 +607,20 @@ public class MessageListViewModelTests
             rawByRef: new() { [header.Id] = Encoding.ASCII.GetBytes("From: a@b.com\r\nSubject: X\r\n\r\nCorpo") });
 
         var vm = new MessageListViewModel(store);
-        await vm.LoadAsync(folder); // não espera ContentLoadTask de propósito
 
-        Assert.Null(vm.Messages.Single().HasAttachment);
+        var previousContext = SynchronizationContext.Current;
+        var pump = new ManualPumpSynchronizationContext();
+        SynchronizationContext.SetSynchronizationContext(pump);
+        try
+        {
+            var loadTask = vm.LoadAsync(folder); // não espera ContentLoadTask de propósito
+            PumpUntil(pump, () => loadTask.IsCompleted);
+
+            Assert.Null(vm.Messages.Single().HasAttachment);
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previousContext);
+        }
     }
 }
