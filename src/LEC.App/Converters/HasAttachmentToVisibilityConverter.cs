@@ -1,3 +1,4 @@
+// src/LEC.App/Converters/HasAttachmentToVisibilityConverter.cs
 using System.Globalization;
 using System.Windows;
 using System.Windows.Data;

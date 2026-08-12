@@ -234,9 +234,8 @@ public partial class MessageListViewModel : ObservableObject
                 if (++sinceRefresh >= ContentRefreshBatchSize && ReferenceEquals(_contentLoadCts, ownerCts))
                 {
                     sinceRefresh = 0;
-                    ApplyFilter(); // sempre -- não só quando SearchField == Content -- pra refletir
-                                    // header.HasAttachment (coluna de anexo) progressivamente, não só
-                                    // resultados de busca por Conteúdo
+                    if (SearchField == MessageSearchField.Content)
+                        ApplyFilter();
                 }
             }
         }
@@ -248,8 +247,8 @@ public partial class MessageListViewModel : ObservableObject
         if (ReferenceEquals(_contentLoadCts, ownerCts))
         {
             IsContentLoading = false;
-            ApplyFilter(); // idem -- refresh final sempre, garante o último lote (< ContentRefreshBatchSize)
-                            // de HasAttachment/corpo pesquisável apareça mesmo em pastas pequenas
+            if (SearchField == MessageSearchField.Content)
+                ApplyFilter(); // garante um refresh final mesmo com menos de ContentRefreshBatchSize mensagens
         }
     }
 
