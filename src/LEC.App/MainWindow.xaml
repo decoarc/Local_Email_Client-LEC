@@ -9,11 +9,8 @@
     <Window.Resources>
         <conv:LoadableToBrushConverter x:Key="LoadableToBrushConverter"/>
         <conv:SpecialToFontWeightConverter x:Key="SpecialToFontWeightConverter"/>
-        <conv:HealthToVisibilityConverter x:Key="HealthToVisibilityConverter"/>
         <conv:HasAttachmentToVisibilityConverter x:Key="HasAttachmentToVisibilityConverter"/>
         <conv:NotLoadableTooltipConverter x:Key="NotLoadableTooltipConverter"/>
-        <conv:RecoveredKindToVisibilityConverter x:Key="RecoveredKindToVisibilityConverter"/>
-        <conv:RecoveredKindToLabelConverter x:Key="RecoveredKindToLabelConverter"/>
         <conv:RecoveredKindToRowBrushConverter x:Key="RecoveredKindToRowBrushConverter"/>
         <conv:AttachmentListToVisibilityConverter x:Key="AttachmentListToVisibilityConverter"/>
         <conv:SpecialToVisibilityConverter x:Key="SpecialToVisibilityConverter"/>
@@ -185,30 +182,12 @@
                         </ListView.ItemContainerStyle>
                         <ListView.View>
                             <GridView>
-                                <GridViewColumn Header="!" Width="24">
-                                    <GridViewColumn.CellTemplate>
-                                        <DataTemplate>
-                                            <TextBlock Text="{Binding Health, StringFormat={}{0}}"
-                                                       Visibility="{Binding Health, Converter={StaticResource HealthToVisibilityConverter}}"
-                                                       Foreground="DarkOrange" FontWeight="Bold" ToolTip="Mensagem com atributo fora do intervalo esperado — dado parcialmente recuperado."/>
-                                        </DataTemplate>
-                                    </GridViewColumn.CellTemplate>
-                                </GridViewColumn>
                                 <GridViewColumn Header="📎" Width="24">
                                     <GridViewColumn.CellTemplate>
                                         <DataTemplate>
                                             <TextBlock Text="📎"
                                                        Visibility="{Binding HasAttachment, Converter={StaticResource HasAttachmentToVisibilityConverter}}"
                                                        ToolTip="Mensagem tem anexo"/>
-                                        </DataTemplate>
-                                    </GridViewColumn.CellTemplate>
-                                </GridViewColumn>
-                                <GridViewColumn Header="Origem" Width="80">
-                                    <GridViewColumn.CellTemplate>
-                                        <DataTemplate>
-                                            <TextBlock Text="{Binding RecoveredKind, Converter={StaticResource RecoveredKindToLabelConverter}}"
-                                                       Visibility="{Binding RecoveredKind, Converter={StaticResource RecoveredKindToVisibilityConverter}}"
-                                                       FontStyle="Italic"/>
                                         </DataTemplate>
                                     </GridViewColumn.CellTemplate>
                                 </GridViewColumn>
