@@ -211,15 +211,18 @@ public partial class MessageListViewModel : ObservableObject
                     var stream = await _store.OpenMessageAsync(header.Id, ownerCts.Token);
                     string body;
                     bool hasAttachment;
+                    string? to, cc;
                     await using (stream)
                     {
-                        (body, hasAttachment) = await MessageRenderer.ExtractListMetadataAsync(stream, ownerCts.Token);
+                        (body, hasAttachment, to, cc) = await MessageRenderer.ExtractListMetadataAsync(stream, ownerCts.Token);
                     }
 
                     if (ReferenceEquals(_contentLoadCts, ownerCts))
                     {
                         _bodyByMessage[header.Id] = body;
                         header.HasAttachment = hasAttachment;
+                        header.To = to;
+                        header.Cc = cc;
                     }
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)

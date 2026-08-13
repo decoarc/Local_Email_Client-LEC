@@ -344,7 +344,7 @@ public class MessageRendererTests
             "\r\n" +
             "Corpo em texto puro";
 
-        var (text, hasAttachment) = await MessageRenderer.ExtractListMetadataAsync(RawMessage(raw));
+        var (text, hasAttachment, _, _) = await MessageRenderer.ExtractListMetadataAsync(RawMessage(raw));
 
         Assert.Contains("Corpo em texto puro", text);
         Assert.False(hasAttachment);
@@ -360,7 +360,7 @@ public class MessageRendererTests
             "\r\n" +
             "<p>Corpo <b>em HTML</b></p>";
 
-        var (text, hasAttachment) = await MessageRenderer.ExtractListMetadataAsync(RawMessage(raw));
+        var (text, hasAttachment, _, _) = await MessageRenderer.ExtractListMetadataAsync(RawMessage(raw));
 
         Assert.Contains("Corpo", text);
         Assert.Contains("em HTML", text);
@@ -379,10 +379,12 @@ public class MessageRendererTests
             "\r\n" +
             "Corpo da mensagem sem parse";
 
-        var (text, hasAttachment) = await MessageRenderer.ExtractListMetadataAsync(RawMessage(raw));
+        var (text, hasAttachment, to, cc) = await MessageRenderer.ExtractListMetadataAsync(RawMessage(raw));
 
         Assert.Contains("Corpo da mensagem sem parse", text);
         Assert.False(hasAttachment);
+        Assert.Null(to);
+        Assert.Null(cc);
     }
 
     [Fact]
@@ -400,7 +402,7 @@ public class MessageRendererTests
         message.WriteTo(stream);
         stream.Position = 0;
 
-        var (_, hasAttachment) = await MessageRenderer.ExtractListMetadataAsync(stream);
+        var (_, hasAttachment, _, _) = await MessageRenderer.ExtractListMetadataAsync(stream);
 
         Assert.True(hasAttachment);
     }
@@ -421,8 +423,100 @@ public class MessageRendererTests
         message.WriteTo(stream);
         stream.Position = 0;
 
-        var (_, hasAttachment) = await MessageRenderer.ExtractListMetadataAsync(stream);
+        var (_, hasAttachment, _, _) = await MessageRenderer.ExtractListMetadataAsync(stream);
 
         Assert.False(hasAttachment);
+    }
+
+    [Fact]
+    public async Task ExtractListMetadataAsyncReturnsToDisplayWithNameAndAddress()
+    {
+        var message = new MimeMessage();
+        message.From.Add(new MailboxAddress("Ana", "ana@example.com"));
+        message.To.Add(new MailboxAddress("Bruno", "bruno@example.com"));
+        message.Subject = "Ola";
+        message.Body = new TextPart("plain") { Text = "Corpo" };
+
+        var stream = new MemoryStream();
+        message.WriteTo(stream);
+        stream.Position = 0;
+
+        var (_, _, to, _) = await MessageRenderer.ExtractListMetadataAsync(stream);
+
+        Assert.Equal("Bruno <bruno@example.com>", to);
+    }
+
+    [Fact]
+    public async Task ExtractListMetadataAsyncJoinsMultipleToRecipientsWithComma()
+    {
+        var message = new MimeMessage();
+        message.From.Add(new MailboxAddress("Ana", "ana@example.com"));
+        message.To.Add(new MailboxAddress("Bruno", "bruno@example.com"));
+        message.To.Add(new MailboxAddress("Carla", "carla@example.com"));
+        message.Subject = "Ola";
+        message.Body = new TextPart("plain") { Text = "Corpo" };
+
+        var stream = new MemoryStream();
+        message.WriteTo(stream);
+        stream.Position = 0;
+
+        var (_, _, to, _) = await MessageRenderer.ExtractListMetadataAsync(stream);
+
+        Assert.Equal("Bruno <bruno@example.com>, Carla <carla@example.com>", to);
+    }
+
+    [Fact]
+    public async Task ExtractListMetadataAsyncReturnsCcDisplayWhenPresent()
+    {
+        var message = new MimeMessage();
+        message.From.Add(new MailboxAddress("Ana", "ana@example.com"));
+        message.To.Add(new MailboxAddress("Bruno", "bruno@example.com"));
+        message.Cc.Add(new MailboxAddress("Carla", "carla@example.com"));
+        message.Subject = "Ola";
+        message.Body = new TextPart("plain") { Text = "Corpo" };
+
+        var stream = new MemoryStream();
+        message.WriteTo(stream);
+        stream.Position = 0;
+
+        var (_, _, _, cc) = await MessageRenderer.ExtractListMetadataAsync(stream);
+
+        Assert.Equal("Carla <carla@example.com>", cc);
+    }
+
+    [Fact]
+    public async Task ExtractListMetadataAsyncReturnsNullCcWhenThereIsNoCcRecipient()
+    {
+        var message = new MimeMessage();
+        message.From.Add(new MailboxAddress("Ana", "ana@example.com"));
+        message.To.Add(new MailboxAddress("Bruno", "bruno@example.com"));
+        message.Subject = "Ola";
+        message.Body = new TextPart("plain") { Text = "Corpo" };
+
+        var stream = new MemoryStream();
+        message.WriteTo(stream);
+        stream.Position = 0;
+
+        var (_, _, _, cc) = await MessageRenderer.ExtractListMetadataAsync(stream);
+
+        Assert.Null(cc);
+    }
+
+    [Fact]
+    public async Task ExtractListMetadataAsyncFormatsAnAddressWithNoDisplayNameAsTheBareAddress()
+    {
+        var message = new MimeMessage();
+        message.From.Add(new MailboxAddress("Ana", "ana@example.com"));
+        message.To.Add(new MailboxAddress(string.Empty, "bruno@example.com"));
+        message.Subject = "Ola";
+        message.Body = new TextPart("plain") { Text = "Corpo" };
+
+        var stream = new MemoryStream();
+        message.WriteTo(stream);
+        stream.Position = 0;
+
+        var (_, _, to, _) = await MessageRenderer.ExtractListMetadataAsync(stream);
+
+        Assert.Equal("bruno@example.com", to);
     }
 }

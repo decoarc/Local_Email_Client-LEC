@@ -39,5 +39,39 @@ public sealed class MessageHeader : INotifyPropertyChanged
         }
     }
 
+    private string? _to;
+
+    /// <summary>
+    /// Destinatário(s) "Para" da mensagem, formatado(s) pra exibição ("Nome &lt;endereço&gt;",
+    /// vários separados por vírgula). O índice .dbx não guarda a lista completa de
+    /// destinatários (só um único ReceiverName/ReceiverAddress) nem CC nenhum -- por isso, assim
+    /// como HasAttachment, só fica disponível depois do parse MIME completo em background.
+    /// null = ainda não verificado ou sem destinatário nesse campo.
+    /// </summary>
+    public string? To
+    {
+        get => _to;
+        set
+        {
+            if (_to == value) return;
+            _to = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(To)));
+        }
+    }
+
+    private string? _cc;
+
+    /// <summary>Mesma origem e mesmas regras de <see cref="To"/>, para o campo "Cc".</summary>
+    public string? Cc
+    {
+        get => _cc;
+        set
+        {
+            if (_cc == value) return;
+            _cc = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Cc)));
+        }
+    }
+
     public event PropertyChangedEventHandler? PropertyChanged;
 }

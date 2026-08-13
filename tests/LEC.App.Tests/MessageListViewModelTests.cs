@@ -586,6 +586,52 @@ public class MessageListViewModelTests
     }
 
     [Fact]
+    public async Task PopulatesToAndCcFromTheMessageRecipients()
+    {
+        var folder = new StoreFolder { Id = 1, Name = "Caixa de entrada", IsLoadable = true, HasBackingFile = true };
+        var header = new MessageHeader { Id = new MessageRef(1, 1), Subject = "Com destinatarios" };
+
+        var message = new MimeMessage();
+        message.From.Add(new MailboxAddress("Ana", "ana@example.com"));
+        message.To.Add(new MailboxAddress("Bruno", "bruno@example.com"));
+        message.Cc.Add(new MailboxAddress("Carla", "carla@example.com"));
+        message.Body = new TextPart("plain") { Text = "Corpo" };
+        var rawStream = new MemoryStream();
+        message.WriteTo(rawStream);
+
+        var store = new FakeMailStore(
+            folders: new[] { folder },
+            headersByFolder: new() { [1] = new() { header } },
+            rawByRef: new() { [header.Id] = rawStream.ToArray() });
+
+        var vm = new MessageListViewModel(store);
+        await vm.LoadAsync(folder);
+        await vm.ContentLoadTask;
+
+        Assert.Equal("Bruno <bruno@example.com>", vm.Messages.Single().To);
+        Assert.Equal("Carla <carla@example.com>", vm.Messages.Single().Cc);
+    }
+
+    [Fact]
+    public async Task ToAndCcStayNullForAMessageWhoseBodyFailsToLoad()
+    {
+        var folder = new StoreFolder { Id = 1, Name = "Caixa de entrada", IsLoadable = true, HasBackingFile = true };
+        var header = new MessageHeader { Id = new MessageRef(1, 1), Subject = "Corrompida" };
+        var store = new FakeMailStore(
+            folders: new[] { folder },
+            headersByFolder: new() { [1] = new() { header } });
+        // Nenhum rawByRef registrado para este MessageRef -- OpenMessageAsync do FakeMailStore
+        // lança InvalidOperationException, simulando um corpo ilegível/corrompido.
+
+        var vm = new MessageListViewModel(store);
+        await vm.LoadAsync(folder);
+        await vm.ContentLoadTask;
+
+        Assert.Null(vm.Messages.Single().To);
+        Assert.Null(vm.Messages.Single().Cc);
+    }
+
+    [Fact]
     // Não usa async Task + "await vm.LoadAsync(folder) sem esperar ContentLoadTask" (como
     // tentado antes) -- isso dependia de sorte de agendamento do ThreadPool pra Task.Yield()
     // dentro de PreloadContentAsync/YieldToUiAsync não ter rodado ainda no instante do Assert.

@@ -196,6 +196,8 @@
                                         <TextBlock Text="{Binding DataContext.MessageList.SenderColumnHeader, ElementName=MessageListView, FallbackValue=De}"/>
                                     </GridViewColumn.Header>
                                 </GridViewColumn>
+                                <GridViewColumn Header="Para" DisplayMemberBinding="{Binding To}" Width="160"/>
+                                <GridViewColumn Header="CC" DisplayMemberBinding="{Binding Cc}" Width="160"/>
                                 <GridViewColumn Header="Assunto" DisplayMemberBinding="{Binding Subject}" Width="350"/>
                                 <GridViewColumn x:Name="DateColumn" DisplayMemberBinding="{Binding Date}" Width="140">
                                     <GridViewColumn.Header>

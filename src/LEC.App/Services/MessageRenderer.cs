@@ -160,10 +160,22 @@ public static class MessageRenderer
             : BuildFallbackHtml(message.TextBody ?? string.Empty);
 
         string? fromDisplay = message.From.Mailboxes.FirstOrDefault() is { } mailbox
-            ? (string.IsNullOrEmpty(mailbox.Name) ? mailbox.Address : $"{mailbox.Name} <{mailbox.Address}>")
+            ? FormatMailbox(mailbox)
             : null;
 
         return new RenderedMessage(message.Subject, fromDisplay, message.Date, html, ExtractAttachments(message));
+    }
+
+    private static string FormatMailbox(MailboxAddress mailbox) =>
+        string.IsNullOrEmpty(mailbox.Name) ? mailbox.Address : $"{mailbox.Name} <{mailbox.Address}>";
+
+    // null quando a lista está vazia (sem destinatário nesse campo), em vez de string vazia --
+    // mesma convenção de "não sabido/não aplicável = null" que HasAttachment usa antes do
+    // pré-carregamento, pra XAML poder tratar a coluna de forma consistente.
+    private static string? FormatAddressList(InternetAddressList list)
+    {
+        var mailboxes = list.Mailboxes.ToList();
+        return mailboxes.Count == 0 ? null : string.Join(", ", mailboxes.Select(FormatMailbox));
     }
 
     // Regex simples pra remover tags ao extrair texto pesquisável de um HtmlBody -- não
@@ -173,21 +185,22 @@ public static class MessageRenderer
     private static readonly Regex HtmlTagRegex = new(@"<[^>]+>", RegexOptions.Compiled);
 
     /// <summary>
-    /// Extrai, num único parse MIME, o texto pesquisável do corpo (pra busca por "Conteúdo") e
-    /// se a mensagem tem pelo menos um anexo real (pra coluna de anexo da lista) --
-    /// MessageListViewModel.PreloadContentAsync usa os dois de uma vez, pra não parsear a
-    /// mesma mensagem duas vezes. Nunca lança: mensagem que falha ao parsear cai pro mesmo
-    /// fallback de bytes brutos que RenderAsync usa pra exibição, com HasAttachment = false
-    /// (não dá pra saber -- mesma política de "trata como não sabido" do resto do app).
+    /// Extrai, num único parse MIME, o texto pesquisável do corpo (pra busca por "Conteúdo"),
+    /// se a mensagem tem pelo menos um anexo real (pra coluna de anexo da lista) e os
+    /// destinatários To/Cc (pra colunas Para/CC da lista) -- MessageListViewModel.PreloadContentAsync
+    /// usa tudo de uma vez, pra não parsear a mesma mensagem duas vezes. Nunca lança: mensagem
+    /// que falha ao parsear cai pro mesmo fallback de bytes brutos que RenderAsync usa pra
+    /// exibição, com HasAttachment = false e To/Cc = null (não dá pra saber -- mesma política de
+    /// "trata como não sabido" do resto do app).
     /// </summary>
-    public static async Task<(string SearchableText, bool HasAttachment)> ExtractListMetadataAsync(
+    public static async Task<(string SearchableText, bool HasAttachment, string? To, string? Cc)> ExtractListMetadataAsync(
         Stream rawMessage, CancellationToken ct = default)
     {
         byte[] raw = await ReadAllBytesAsync(rawMessage, ct);
         MimeMessage? message = await TryParseAsync(raw, ct);
 
         if (message is null)
-            return (Encoding.Latin1.GetString(raw), false);
+            return (Encoding.Latin1.GetString(raw), false, null, null);
 
         string text = message.TextBody is { } plain
             ? plain
@@ -200,7 +213,7 @@ public static class MessageRenderer
         // abaixo neste arquivo -- mesmas lacunas conhecidas documentadas ali, nenhuma heurística nova.
         bool hasAttachment = message.Attachments.OfType<MimePart>().Any();
 
-        return (text, hasAttachment);
+        return (text, hasAttachment, FormatAddressList(message.To), FormatAddressList(message.Cc));
     }
 
     // MimeMessage.Attachments é puramente baseado em ContentDisposition?.IsAttachment -- não
