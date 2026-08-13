@@ -212,12 +212,6 @@
                 <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch"/>
 
                 <DockPanel Grid.Row="2">
-                    <Border DockPanel.Dock="Top" x:Name="ImagesBlockedBar" Background="#FFF3CD" Padding="6" Visibility="Collapsed">
-                        <DockPanel>
-                            <Button DockPanel.Dock="Right" Content="Exibir imagens" Click="ShowImages_Click"/>
-                            <TextBlock Text="Imagens remotas foram bloqueadas por padrão." VerticalAlignment="Center"/>
-                        </DockPanel>
-                    </Border>
                     <Border DockPanel.Dock="Top" Background="#EFEFEF" Padding="6"
                             Visibility="{Binding MessageReader.Current.Attachments,
                                          Converter={StaticResource AttachmentListToVisibilityConverter},

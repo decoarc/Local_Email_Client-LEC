@@ -51,7 +51,7 @@ Essa regra não é negociável e deve ser verificada em revisão de código: nen
 |---|---|---|
 | **MimeKit** | MIT | Parsing RFC822: headers, MIME, anexos, charsets. Crítico para arquivos brasileiros antigos em ISO-8859-1 / windows-1252 com headers malformados |
 | **XstReader** | MIT | Leitura de `.pst` e `.ost` em C# puro, sem Outlook instalado e sem P/Invoke |
-| **WebView2** | — | Renderização de corpo HTML, com script desligado e imagens remotas bloqueadas por padrão |
+| **WebView2** | — | Renderização de corpo HTML, com script desligado. Imagens remotas carregam automaticamente (decisão do usuário, ver §9) |
 | **SQLite** (`Microsoft.Data.Sqlite`) | MIT | Metadados da biblioteca, índice de busca FTS5, journal de operações |
 
 O parser de `.dbx` é escrito do zero — não existe biblioteca .NET mantida para o formato.
@@ -356,7 +356,7 @@ Três painéis, na ergonomia do Outlook Express: árvore de pastas à esquerda, 
 Pontos que exigem cuidado:
 
 - **Lista virtualizada** de verdade — precisa aguentar centenas de milhares de itens.
-- **Corpo HTML sempre isolado:** script desligado, imagens remotas bloqueadas por padrão com barra *"Exibir imagens"*. Emails antigos são cheios de pixels de rastreamento que ainda funcionam.
+- **Corpo HTML sempre isolado:** script desligado. Imagens remotas carregam automaticamente, por decisão explícita do usuário (2026-08-13) — ciente de que emails antigos são cheios de pixels de rastreamento que ainda funcionam; se isso voltar a ser um problema, o bloqueio-por-padrão é reintroduzível reimplementando `ImageBlockingWebView2Handler` (removido nesse commit) e religando ao `WebResourceRequested` do WebView2.
 - **Imagens embutidas (`cid:`)** — anexos referenciados de dentro do próprio HTML (ex.: logo de assinatura) são resolvidos para exibição inline; diferente de imagem remota, não fazem requisição de rede.
 - **Links nunca abrem sozinhos** — sempre mostrar o destino real antes.
 - **Degradação elegante:** arquivo aberto por outro processo, mídia somente-leitura, arquivo truncado ou caminho de rede indisponível precisam virar mensagem clara, não exceção.

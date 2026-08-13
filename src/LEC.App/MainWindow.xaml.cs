@@ -27,7 +27,6 @@ public partial class MainWindow : Window
     private static readonly string[] AllowedLinkSchemes = { "http", "https", "mailto" };
 
     private readonly MainWindowViewModel _viewModel = new();
-    private LEC.App.Services.ImageBlockingWebView2Handler? _imageBlocker;
     private CancellationTokenSource? _scavengeCts;
     // The profile the in-flight scan (if any) is actually running against -- distinct from
     // _selectedProfile, which can move to a different profile's tree while the scan keeps
@@ -87,7 +86,6 @@ public partial class MainWindow : Window
             core.Settings.IsWebMessageEnabled = false;
             core.Settings.AreDefaultScriptDialogsEnabled = false;
 
-            _imageBlocker = new LEC.App.Services.ImageBlockingWebView2Handler(core);
             core.NavigationStarting += CoreWebView2_NavigationStarting;
             core.NewWindowRequested += CoreWebView2_NewWindowRequested;
         }
@@ -141,16 +139,6 @@ public partial class MainWindow : Window
         {
             _viewModel.StatusText = $"Não foi possível abrir o link: {ex.Message}";
         }
-    }
-
-    private void ShowImages_Click(object sender, RoutedEventArgs e)
-    {
-        if (_imageBlocker is null)
-            return;
-
-        _imageBlocker.BlockImages = false;
-        ImagesBlockedBar.Visibility = Visibility.Collapsed;
-        ReaderWebView.Reload();
     }
 
     private async void SaveAttachment_Click(object sender, RoutedEventArgs e)
@@ -254,7 +242,6 @@ public partial class MainWindow : Window
             // but ReaderWebView isn't data-bound -- it keeps showing the last rendered message
             // body unless we explicitly navigate it away.
             NavigateToRenderedMessage(string.Empty);
-            ImagesBlockedBar.Visibility = Visibility.Collapsed;
         }
 
         _viewModel.CloseProfile(profile);
@@ -446,7 +433,6 @@ public partial class MainWindow : Window
             ScavengeButton.Visibility = Visibility.Collapsed;
             RecoverableBar.Visibility = Visibility.Collapsed;
             NavigateToRenderedMessage(string.Empty);
-            ImagesBlockedBar.Visibility = Visibility.Collapsed;
             _viewModel.ClearCurrentFolder();
         }
 
@@ -531,7 +517,6 @@ public partial class MainWindow : Window
                 ScavengeButton.Visibility = Visibility.Collapsed;
                 RecoverableBar.Visibility = Visibility.Collapsed;
                 NavigateToRenderedMessage(string.Empty);
-                ImagesBlockedBar.Visibility = Visibility.Collapsed;
                 _viewModel.ClearCurrentFolder();
             }
 
@@ -672,12 +657,6 @@ public partial class MainWindow : Window
         {
             if (MessageListView.SelectedItems.Count == 1 && MessageListView.SelectedItem is MessageHeader header)
             {
-                if (_imageBlocker is not null)
-                {
-                    _imageBlocker.BlockImages = true;
-                    ImagesBlockedBar.Visibility = Visibility.Visible;
-                }
-
                 await _viewModel.SelectMessageAsync(header);
                 if (_viewModel.MessageReader?.Current is { } rendered)
                     NavigateToRenderedMessage(rendered.Html);
@@ -686,7 +665,6 @@ public partial class MainWindow : Window
             {
                 // 0 selected, or a batch selection (2+) -- no single message to show.
                 NavigateToRenderedMessage(string.Empty);
-                ImagesBlockedBar.Visibility = Visibility.Collapsed;
             }
         }
         catch (Exception ex)
@@ -821,7 +799,6 @@ public partial class MainWindow : Window
         }
 
         NavigateToRenderedMessage(string.Empty);
-        ImagesBlockedBar.Visibility = Visibility.Collapsed;
 
         if (failure is not null)
             MessageBox.Show(this, failure.Message, "LEC — Não foi possível mover a mensagem", MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -887,7 +864,6 @@ public partial class MainWindow : Window
         }
 
         NavigateToRenderedMessage(string.Empty);
-        ImagesBlockedBar.Visibility = Visibility.Collapsed;
 
         if (failure is not null)
             MessageBox.Show(this, failure.Message, "LEC — Não foi possível apagar a mensagem", MessageBoxButton.OK, MessageBoxImage.Warning);
