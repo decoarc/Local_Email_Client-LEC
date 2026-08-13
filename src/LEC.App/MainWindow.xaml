@@ -199,7 +199,7 @@
                                 <GridViewColumn Header="Para" DisplayMemberBinding="{Binding To}" Width="160"/>
                                 <GridViewColumn Header="CC" DisplayMemberBinding="{Binding Cc}" Width="160"/>
                                 <GridViewColumn Header="Assunto" DisplayMemberBinding="{Binding Subject}" Width="350"/>
-                                <GridViewColumn x:Name="DateColumn" DisplayMemberBinding="{Binding Date}" Width="140">
+                                <GridViewColumn x:Name="DateColumn" DisplayMemberBinding="{Binding Date, StringFormat='{}{0:dd/MM/yyyy HH:mm}'}" Width="140">
                                     <GridViewColumn.Header>
                                         <TextBlock Text="{Binding DataContext.MessageList.DateColumnHeader, ElementName=MessageListView, FallbackValue=Data}"/>
                                     </GridViewColumn.Header>
