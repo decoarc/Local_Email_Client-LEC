@@ -813,6 +813,23 @@ public partial class MainWindow : Window
         await ConfirmAndDeleteAsync(messages);
     }
 
+    private async void DeleteDuplicatesButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel.MessageList is not { } messageList)
+            return;
+
+        var duplicates = messageList.GetDuplicateMessages();
+        if (duplicates.Count == 0)
+        {
+            MessageBox.Show(this, "Nenhuma mensagem duplicada foi encontrada nesta pasta.",
+                "LEC — Apagar duplicatas", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        string question = $"{duplicates.Count} e-mails duplicados foram encontrados. Tem certeza que deseja excluí-los?";
+        await ConfirmAndDeleteAsync(duplicates.ToList(), question);
+    }
+
     private async void MessageListView_KeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key != Key.Delete)
@@ -824,12 +841,12 @@ public partial class MainWindow : Window
         await ConfirmAndDeleteAsync(MessageListView.SelectedItems.Cast<MessageHeader>().ToList());
     }
 
-    private async Task ConfirmAndDeleteAsync(List<MessageHeader> messages)
+    private async Task ConfirmAndDeleteAsync(List<MessageHeader> messages, string? question = null)
     {
         if (_selectedProfile is not { } sourceProfile)
             return;
 
-        string question = messages.Count == 1
+        question ??= messages.Count == 1
             ? "Apagar esta mensagem?"
             : $"Apagar estas {messages.Count} mensagens?";
         var result = MessageBox.Show(this, question, "LEC — Apagar mensagem",

@@ -727,6 +727,65 @@ public class MessageListViewModelTests
     }
 
     [Fact]
+    public async Task GetDuplicateMessagesReturnsOnlyTheMessagesMarkedAsDuplicate()
+    {
+        var folder = new StoreFolder { Id = 1, Name = "Caixa de entrada", IsLoadable = true, HasBackingFile = true };
+        var date = new DateTime(2026, 1, 1, 10, 0, 0);
+        var firstArrival = new MessageHeader { Id = new MessageRef(1, 1), Subject = "Assunto", SenderAddress = "ana@example.com", Date = date };
+        var secondArrival = new MessageHeader { Id = new MessageRef(1, 2), Subject = "Assunto", SenderAddress = "ana@example.com", Date = date };
+        var unique = new MessageHeader { Id = new MessageRef(1, 3), Subject = "Outro assunto", SenderAddress = "ana@example.com", Date = date };
+
+        byte[] RawTo(string subject) =>
+            Encoding.ASCII.GetBytes($"From: ana@example.com\r\nTo: bruno@example.com\r\nSubject: {subject}\r\n\r\nCorpo");
+
+        var store = new FakeMailStore(
+            folders: new[] { folder },
+            headersByFolder: new() { [1] = new() { firstArrival, secondArrival, unique } },
+            rawByRef: new()
+            {
+                [firstArrival.Id] = RawTo("Assunto"),
+                [secondArrival.Id] = RawTo("Assunto"),
+                [unique.Id] = RawTo("Outro assunto"),
+            });
+
+        var vm = new MessageListViewModel(store);
+        await vm.LoadAsync(folder);
+        await vm.ContentLoadTask;
+
+        Assert.Equal(new[] { secondArrival }, vm.GetDuplicateMessages());
+    }
+
+    [Fact]
+    public async Task GetDuplicateMessagesIgnoresTheActiveSearchFilter()
+    {
+        var folder = new StoreFolder { Id = 1, Name = "Caixa de entrada", IsLoadable = true, HasBackingFile = true };
+        var date = new DateTime(2026, 1, 1, 10, 0, 0);
+        var firstArrival = new MessageHeader { Id = new MessageRef(1, 1), Subject = "Assunto", SenderAddress = "ana@example.com", Date = date };
+        var secondArrival = new MessageHeader { Id = new MessageRef(1, 2), Subject = "Assunto", SenderAddress = "ana@example.com", Date = date };
+
+        byte[] RawTo(string subject) =>
+            Encoding.ASCII.GetBytes($"From: ana@example.com\r\nTo: bruno@example.com\r\nSubject: {subject}\r\n\r\nCorpo");
+
+        var store = new FakeMailStore(
+            folders: new[] { folder },
+            headersByFolder: new() { [1] = new() { firstArrival, secondArrival } },
+            rawByRef: new()
+            {
+                [firstArrival.Id] = RawTo("Assunto"),
+                [secondArrival.Id] = RawTo("Assunto"),
+            });
+
+        var vm = new MessageListViewModel(store);
+        await vm.LoadAsync(folder);
+        await vm.ContentLoadTask;
+
+        vm.SearchText = "texto que não bate com nada"; // Messages fica vazio, mas a pasta continua tendo a duplicata
+        Assert.Empty(vm.Messages);
+
+        Assert.Equal(new[] { secondArrival }, vm.GetDuplicateMessages());
+    }
+
+    [Fact]
     // Não usa async Task + "await vm.LoadAsync(folder) sem esperar ContentLoadTask" (como
     // tentado antes) -- isso dependia de sorte de agendamento do ThreadPool pra Task.Yield()
     // dentro de PreloadContentAsync/YieldToUiAsync não ter rodado ainda no instante do Assert.

@@ -101,6 +101,14 @@ public partial class MessageListViewModel : ObservableObject
         ContentLoadTask = PreloadContentAsync(_headers, cts);
     }
 
+    /// <summary>
+    /// Todas as mensagens da pasta atual marcadas como duplicata (ver DuplicateDetector),
+    /// independente do texto de busca ativo -- "duplicatas da pasta" é sobre a pasta inteira,
+    /// não sobre o que Messages está mostrando no momento.
+    /// </summary>
+    public IReadOnlyList<MessageHeader> GetDuplicateMessages() =>
+        _headers.Where(h => h.IsDuplicate == true).ToList();
+
     public void SortBySender() => ApplySortColumn(MessageSortColumn.Sender);
 
     public void SortByDate() => ApplySortColumn(MessageSortColumn.Date);

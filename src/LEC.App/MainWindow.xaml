@@ -145,6 +145,8 @@
                                        FontStyle="Italic" Foreground="Gray"
                                        Visibility="{Binding MessageList.IsContentLoading, Converter={StaticResource BoolToVisibilityConverter}}"/>
                         </StackPanel>
+                        <Button x:Name="DeleteDuplicatesButton" DockPanel.Dock="Left" Content="Apagar duplicatas"
+                                Margin="0,0,8,0" Click="DeleteDuplicatesButton_Click"/>
                         <TextBox x:Name="SearchBox" VerticalContentAlignment="Center" Margin="0,0,8,0"
                                  TextChanged="SearchBox_TextChanged"/>
                     </DockPanel>
