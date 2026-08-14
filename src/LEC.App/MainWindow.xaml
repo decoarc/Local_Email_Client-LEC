@@ -10,6 +10,7 @@
         <conv:LoadableToBrushConverter x:Key="LoadableToBrushConverter"/>
         <conv:SpecialToFontWeightConverter x:Key="SpecialToFontWeightConverter"/>
         <conv:HasAttachmentToVisibilityConverter x:Key="HasAttachmentToVisibilityConverter"/>
+        <conv:IsDuplicateToGlyphConverter x:Key="IsDuplicateToGlyphConverter"/>
         <conv:NotLoadableTooltipConverter x:Key="NotLoadableTooltipConverter"/>
         <conv:RecoveredKindToRowBrushConverter x:Key="RecoveredKindToRowBrushConverter"/>
         <conv:AttachmentListToVisibilityConverter x:Key="AttachmentListToVisibilityConverter"/>
@@ -188,6 +189,14 @@
                                             <TextBlock Text="📎"
                                                        Visibility="{Binding HasAttachment, Converter={StaticResource HasAttachmentToVisibilityConverter}}"
                                                        ToolTip="Mensagem tem anexo"/>
+                                        </DataTemplate>
+                                    </GridViewColumn.CellTemplate>
+                                </GridViewColumn>
+                                <GridViewColumn Header="⧉" Width="24">
+                                    <GridViewColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding IsDuplicate, Converter={StaticResource IsDuplicateToGlyphConverter}}"
+                                                       ToolTip="Mensagem duplicada"/>
                                         </DataTemplate>
                                     </GridViewColumn.CellTemplate>
                                 </GridViewColumn>

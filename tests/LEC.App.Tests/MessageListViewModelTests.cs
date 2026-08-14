@@ -632,6 +632,101 @@ public class MessageListViewModelTests
     }
 
     [Fact]
+    public async Task MarksTheSecondOfTwoDuplicateMessagesAfterPreloadCompletes()
+    {
+        var folder = new StoreFolder { Id = 1, Name = "Caixa de entrada", IsLoadable = true, HasBackingFile = true };
+        var date = new DateTime(2026, 1, 1, 10, 0, 0);
+        var firstArrival = new MessageHeader { Id = new MessageRef(1, 1), Subject = "Assunto", SenderAddress = "ana@example.com", Date = date };
+        var secondArrival = new MessageHeader { Id = new MessageRef(1, 2), Subject = "Assunto", SenderAddress = "ana@example.com", Date = date };
+
+        byte[] RawTo(string to) =>
+            Encoding.ASCII.GetBytes($"From: ana@example.com\r\nTo: {to}\r\nSubject: Assunto\r\n\r\nCorpo");
+
+        var store = new FakeMailStore(
+            folders: new[] { folder },
+            headersByFolder: new() { [1] = new() { firstArrival, secondArrival } },
+            rawByRef: new()
+            {
+                [firstArrival.Id] = RawTo("bruno@example.com"),
+                [secondArrival.Id] = RawTo("bruno@example.com"),
+            });
+
+        var vm = new MessageListViewModel(store);
+        await vm.LoadAsync(folder);
+        await vm.ContentLoadTask;
+
+        Assert.False(firstArrival.IsDuplicate);
+        Assert.True(secondArrival.IsDuplicate);
+    }
+
+    [Fact]
+    public async Task DoesNotMarkMessagesWithDifferentSubjectsAsDuplicateAfterPreloadCompletes()
+    {
+        var folder = new StoreFolder { Id = 1, Name = "Caixa de entrada", IsLoadable = true, HasBackingFile = true };
+        var date = new DateTime(2026, 1, 1, 10, 0, 0);
+        var a = new MessageHeader { Id = new MessageRef(1, 1), Subject = "Assunto A", SenderAddress = "ana@example.com", Date = date };
+        var b = new MessageHeader { Id = new MessageRef(1, 2), Subject = "Assunto B", SenderAddress = "ana@example.com", Date = date };
+
+        byte[] RawTo(string subject) =>
+            Encoding.ASCII.GetBytes($"From: ana@example.com\r\nTo: bruno@example.com\r\nSubject: {subject}\r\n\r\nCorpo");
+
+        var store = new FakeMailStore(
+            folders: new[] { folder },
+            headersByFolder: new() { [1] = new() { a, b } },
+            rawByRef: new()
+            {
+                [a.Id] = RawTo("Assunto A"),
+                [b.Id] = RawTo("Assunto B"),
+            });
+
+        var vm = new MessageListViewModel(store);
+        await vm.LoadAsync(folder);
+        await vm.ContentLoadTask;
+
+        Assert.False(a.IsDuplicate);
+        Assert.False(b.IsDuplicate);
+    }
+
+    [Fact]
+    public void IsDuplicateIsNullForEveryMessageBeforePreloadCompletes()
+    {
+        var folder = new StoreFolder { Id = 1, Name = "Caixa de entrada", IsLoadable = true, HasBackingFile = true };
+        var date = new DateTime(2026, 1, 1, 10, 0, 0);
+        var firstArrival = new MessageHeader { Id = new MessageRef(1, 1), Subject = "Assunto", SenderAddress = "ana@example.com", Date = date };
+        var secondArrival = new MessageHeader { Id = new MessageRef(1, 2), Subject = "Assunto", SenderAddress = "ana@example.com", Date = date };
+
+        byte[] RawTo(string to) =>
+            Encoding.ASCII.GetBytes($"From: ana@example.com\r\nTo: {to}\r\nSubject: Assunto\r\n\r\nCorpo");
+
+        var store = new FakeMailStore(
+            folders: new[] { folder },
+            headersByFolder: new() { [1] = new() { firstArrival, secondArrival } },
+            rawByRef: new()
+            {
+                [firstArrival.Id] = RawTo("bruno@example.com"),
+                [secondArrival.Id] = RawTo("bruno@example.com"),
+            });
+
+        var vm = new MessageListViewModel(store);
+
+        var previousContext = SynchronizationContext.Current;
+        var pump = new ManualPumpSynchronizationContext();
+        SynchronizationContext.SetSynchronizationContext(pump);
+        try
+        {
+            var loadTask = vm.LoadAsync(folder); // não espera ContentLoadTask de propósito
+            PumpUntil(pump, () => loadTask.IsCompleted);
+
+            Assert.Null(firstArrival.IsDuplicate);
+            Assert.Null(secondArrival.IsDuplicate);
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previousContext);
+        }
+    }
+
+    [Fact]
     // Não usa async Task + "await vm.LoadAsync(folder) sem esperar ContentLoadTask" (como
     // tentado antes) -- isso dependia de sorte de agendamento do ThreadPool pra Task.Yield()
     // dentro de PreloadContentAsync/YieldToUiAsync não ter rodado ainda no instante do Assert.

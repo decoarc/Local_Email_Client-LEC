@@ -249,6 +249,10 @@ public partial class MessageListViewModel : ObservableObject
 
         if (ReferenceEquals(_contentLoadCts, ownerCts))
         {
+            // Só dá pra rodar depois que a pasta inteira terminou: DuplicateDetector compara
+            // pelo campo To, que só existe a partir daqui (ver PreloadContentAsync acima).
+            DuplicateDetector.MarkDuplicates(headers);
+
             IsContentLoading = false;
             if (SearchField == MessageSearchField.Content)
                 ApplyFilter(); // garante um refresh final mesmo com menos de ContentRefreshBatchSize mensagens

@@ -73,5 +73,26 @@ public sealed class MessageHeader : INotifyPropertyChanged
         }
     }
 
+    private bool? _isDuplicate;
+
+    /// <summary>
+    /// true = existe outra mensagem com o mesmo remetente/destinatário/assunto/data recebida
+    /// antes desta; false = é a mais antiga do seu grupo (ou não tem nenhuma duplicata); null =
+    /// DuplicateDetector.MarkDuplicates ainda não rodou pra pasta atual. Depende de <see cref="To"/>,
+    /// então herda a mesma janela de "ainda não verificado" desse campo -- só fica definitivo
+    /// (true ou false) depois que o pré-carregamento de MessageListViewModel processa a pasta
+    /// inteira e chama MarkDuplicates uma vez no fim.
+    /// </summary>
+    public bool? IsDuplicate
+    {
+        get => _isDuplicate;
+        set
+        {
+            if (_isDuplicate == value) return;
+            _isDuplicate = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsDuplicate)));
+        }
+    }
+
     public event PropertyChangedEventHandler? PropertyChanged;
 }
