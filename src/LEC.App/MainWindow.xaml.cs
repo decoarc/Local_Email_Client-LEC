@@ -304,30 +304,17 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, "LEC — Compactar pasta", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(this, ex.Message, "LEC — Compactar pasta", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
-        var pending = status.PendingFolders.FirstOrDefault(f => f.FolderId == node.Folder.Id);
-        if (pending is null)
-            return;
-
-        var answer = MessageBox.Show(this,
-            $"Compactar a pasta \"{node.DisplayName}\" ({CompactPrompt.FormatBytes(pending.EstimatedReclaimableBytes)})?",
-            "LEC — Compactar pasta",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Question);
-        if (answer != MessageBoxResult.Yes)
+        if (!status.PendingFolders.Any(f => f.FolderId == node.Folder.Id))
             return;
 
         var dialog = new CompactProgressDialog(_viewModel, profile, node.Folder.Id, node.DisplayName) { Owner = this };
         bool? ok = dialog.ShowDialog();
         if (ok != true)
-        {
-            MessageBox.Show(this, dialog.Failure?.Message ?? "A compactação não foi concluída.",
-                "LEC — Compactar pasta", MessageBoxButton.OK, MessageBoxImage.Error);
             return;
-        }
 
         if (ReferenceEquals(_selectedProfile, profile)
             && _selectedNode is { } current
@@ -353,29 +340,17 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, "LEC — Compactar pastas", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(this, ex.Message, "LEC — Compactar pastas", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
         if (status.PendingFolderCount == 0)
             return;
 
-        var answer = MessageBox.Show(this,
-            CompactPrompt.BuildClosePrompt(status.PendingFolderCount, status.TotalEstimatedReclaimableBytes, forSingleProfile: true),
-            "LEC — Compactar pastas",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Question);
-        if (answer != MessageBoxResult.Yes)
-            return;
-
         var dialog = new CompactProgressDialog(_viewModel, profile) { Owner = this };
         bool? ok = dialog.ShowDialog();
         if (ok != true)
-        {
-            MessageBox.Show(this, dialog.Failure?.Message ?? "A compactação não foi concluída.",
-                "LEC — Compactar pastas", MessageBoxButton.OK, MessageBoxImage.Error);
             return;
-        }
 
         if (ReferenceEquals(_selectedProfile, profile) && _selectedNode is { } node)
         {
