@@ -32,6 +32,7 @@ public partial class MainWindow : Window
     // _selectedProfile, which can move to a different profile's tree while the scan keeps
     // running in the background (see ScavengeButton_Click's scanProfile/scanNode snapshot).
     private ProfileViewModel? _scavengeProfile;
+    private readonly HashSet<ProfileViewModel> _closingProfiles = new();
     private ProfileViewModel? _selectedProfile;
     private FolderNodeViewModel? _selectedNode;
     private TreeView? _selectedTreeView;
@@ -212,61 +213,80 @@ public partial class MainWindow : Window
     {
         if ((sender as FrameworkElement)?.DataContext is not ProfileViewModel profile)
             return;
+        if (!_closingProfiles.Add(profile))
+            return;
 
-        var status = await _viewModel.GetCompactStatusAsync(profile);
-        if (status.PendingFolderCount > 0)
+        try
         {
-            var answer = MessageBox.Show(
-                this,
-                CompactPrompt.BuildClosePrompt(status.PendingFolderCount, status.TotalEstimatedReclaimableBytes, forSingleProfile: true),
-                "LEC — Compactar pastas",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Question);
-            if (answer == MessageBoxResult.Yes)
+            CompactStatus status;
+            try
             {
-                var dialog = new CompactProgressDialog(_viewModel, profile) { Owner = this };
-                bool? ok = dialog.ShowDialog();
-                if (ok != true)
+                status = await _viewModel.GetCompactStatusAsync(profile);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, ex.Message, "LEC — Compactar pastas", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            if (status.PendingFolderCount > 0)
+            {
+                var answer = MessageBox.Show(
+                    this,
+                    CompactPrompt.BuildClosePrompt(status.PendingFolderCount, status.TotalEstimatedReclaimableBytes, forSingleProfile: true),
+                    "LEC — Compactar pastas",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Question);
+                if (answer == MessageBoxResult.Yes)
                 {
-                    MessageBox.Show(this, dialog.Failure?.Message ?? "A compactação não foi concluída.",
-                        "LEC — Compactar pastas", MessageBoxButton.OK, MessageBoxImage.Error);
-                    return; // profile stays open
+                    var dialog = new CompactProgressDialog(_viewModel, profile) { Owner = this };
+                    bool? ok = dialog.ShowDialog();
+                    if (ok != true)
+                    {
+                        MessageBox.Show(this, dialog.Failure?.Message ?? "A compactação não foi concluída.",
+                            "LEC — Compactar pastas", MessageBoxButton.OK, MessageBoxImage.Error);
+                        return; // profile stays open
+                    }
                 }
             }
-        }
 
-        // A scavenge scan reads through the profile's DbxStore/DbxEmailFile in the
-        // background -- cancel it before disposing that store below, so the scan sees a
-        // clean OperationCanceledException instead of an ObjectDisposedException from
-        // whatever it happens to be reading mid-scan. This is checked against
-        // _scavengeProfile (the profile the in-flight scan actually owns), not
-        // _selectedProfile: navigating to a different profile's tree while a scan runs in
-        // the background is allowed, so the scavenged profile and the selected profile can
-        // be two different profiles by the time either one's "x" is clicked.
-        if (ReferenceEquals(_scavengeProfile, profile))
+            // A scavenge scan reads through the profile's DbxStore/DbxEmailFile in the
+            // background -- cancel it before disposing that store below, so the scan sees a
+            // clean OperationCanceledException instead of an ObjectDisposedException from
+            // whatever it happens to be reading mid-scan. This is checked against
+            // _scavengeProfile (the profile the in-flight scan actually owns), not
+            // _selectedProfile: navigating to a different profile's tree while a scan runs in
+            // the background is allowed, so the scavenged profile and the selected profile can
+            // be two different profiles by the time either one's "x" is clicked.
+            if (ReferenceEquals(_scavengeProfile, profile))
+            {
+                _scavengeCts?.Cancel();
+            }
+
+            if (ReferenceEquals(_selectedProfile, profile))
+            {
+                _selectedProfile = null;
+                _selectedNode = null;
+                _selectedTreeView = null;
+
+                ScavengeButton.Visibility = Visibility.Collapsed;
+                CancelScavengeButton.Visibility = Visibility.Collapsed;
+                RecoverableBar.Visibility = Visibility.Collapsed;
+
+                // Design §4/§6: closing the active profile returns list/reader/scavenge to the
+                // "no profile open" visual state. MessageList/MessageReader/CurrentFolderScavengeStatus
+                // are cleared by _viewModel.CloseProfile below (bound, so the list clears itself),
+                // but ReaderWebView isn't data-bound -- it keeps showing the last rendered message
+                // body unless we explicitly navigate it away.
+                NavigateToRenderedMessage(string.Empty);
+            }
+
+            _viewModel.CloseProfile(profile);
+        }
+        finally
         {
-            _scavengeCts?.Cancel();
+            _closingProfiles.Remove(profile);
         }
-
-        if (ReferenceEquals(_selectedProfile, profile))
-        {
-            _selectedProfile = null;
-            _selectedNode = null;
-            _selectedTreeView = null;
-
-            ScavengeButton.Visibility = Visibility.Collapsed;
-            CancelScavengeButton.Visibility = Visibility.Collapsed;
-            RecoverableBar.Visibility = Visibility.Collapsed;
-
-            // Design §4/§6: closing the active profile returns list/reader/scavenge to the
-            // "no profile open" visual state. MessageList/MessageReader/CurrentFolderScavengeStatus
-            // are cleared by _viewModel.CloseProfile below (bound, so the list clears itself),
-            // but ReaderWebView isn't data-bound -- it keeps showing the last rendered message
-            // body unless we explicitly navigate it away.
-            NavigateToRenderedMessage(string.Empty);
-        }
-
-        _viewModel.CloseProfile(profile);
     }
 
     private async void ArquivoMenu_SubmenuOpened(object sender, RoutedEventArgs e)
