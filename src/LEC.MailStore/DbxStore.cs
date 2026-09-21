@@ -890,13 +890,20 @@ public sealed class DbxStore : IMailStore
                     continue;
 
                 long bytes = 0;
-                using (var emailFile = DbxEmailFile.Open(filePath))
+                try
                 {
-                    foreach (var info in emailFile.Messages)
+                    using (var emailFile = DbxEmailFile.Open(filePath))
                     {
-                        if (wasteOffsets.Contains(info.IndexNodeOffset))
-                            bytes += info.MessageSize;
+                        foreach (var info in emailFile.Messages)
+                        {
+                            if (wasteOffsets.Contains(info.IndexNodeOffset))
+                                bytes += info.MessageSize;
+                        }
                     }
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or DbxFormatException)
+                {
+                    bytes = 0;
                 }
 
                 pending.Add(new CompactFolderStatus(folder.Id, folder.Name, bytes));

@@ -237,6 +237,43 @@ public class DbxStoreCompactTests
     }
 
     [Fact]
+    public async Task GetCompactStatusAsyncListsUnreadablePendingFolderWithZeroBytes()
+    {
+        string dir = BuildProfileWithTwoFolders();
+        string deletedCache = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + "-deleted.db");
+        try
+        {
+            using (var store = DbxStore.Open(dir, deletedMessageCacheDatabasePath: deletedCache))
+            {
+                await DeleteMortaAsync(store, store.Folders.Single(f => f.Id == 1));
+                await DeleteMortaAsync(store, store.Folders.Single(f => f.Id == 2));
+            }
+
+            File.WriteAllBytes(Path.Combine(dir, "B.dbx"), new byte[] { 0x00, 0x01, 0x02, 0x03 });
+
+            using (var store = DbxStore.Open(dir, deletedMessageCacheDatabasePath: deletedCache))
+            {
+                var status = await store.GetCompactStatusAsync();
+                Assert.Equal(2, status.PendingFolderCount);
+
+                var pendingA = status.PendingFolders.Single(f => f.FolderId == 1);
+                Assert.Equal("A", pendingA.FolderName);
+                Assert.True(pendingA.EstimatedReclaimableBytes > 0);
+
+                var pendingB = status.PendingFolders.Single(f => f.FolderId == 2);
+                Assert.Equal("B", pendingB.FolderName);
+                Assert.Equal(0, pendingB.EstimatedReclaimableBytes);
+            }
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            File.Delete(deletedCache);
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task CompactAllPendingAsyncCompactsEveryPendingFolderAndReportsProgress()
     {
         string dir = BuildProfileWithTwoFolders();

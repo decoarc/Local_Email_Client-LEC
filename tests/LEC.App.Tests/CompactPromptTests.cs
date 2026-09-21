@@ -43,4 +43,15 @@ public class CompactPromptTests
 
         Assert.Equal("Há 2 pasta(s) com espaço a recuperar (~1 MB). Compactar agora?", text);
     }
+
+    [Fact]
+    public void BuildCloseAnywayPromptIncludesErrorAndAsksYesNo()
+    {
+        string text = CompactPrompt.BuildCloseAnywayPrompt("arquivo ilegível");
+
+        Assert.Equal(
+            "arquivo ilegível" + Environment.NewLine + Environment.NewLine
+            + "Não foi possível verificar o espaço a recuperar. Fechar mesmo assim?",
+            text);
+    }
 }

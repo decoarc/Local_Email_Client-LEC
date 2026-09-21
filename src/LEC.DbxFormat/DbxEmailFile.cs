@@ -16,8 +16,19 @@ public sealed class DbxEmailFile : IDisposable
         Messages = messages;
     }
 
-    public static DbxEmailFile Open(string path) =>
-        OpenFrom(new MemoryMappedDbxSource(path), ownsSource: true);
+    public static DbxEmailFile Open(string path)
+    {
+        var source = new MemoryMappedDbxSource(path);
+        try
+        {
+            return OpenFrom(source, ownsSource: true);
+        }
+        catch
+        {
+            source.Dispose();
+            throw;
+        }
+    }
 
     public static DbxEmailFile OpenFrom(IDbxByteSource source, bool ownsSource)
     {

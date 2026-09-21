@@ -221,18 +221,24 @@ public partial class MainWindow : Window
 
         try
         {
-            CompactStatus status;
+            CompactStatus? status = null;
             try
             {
                 status = await _viewModel.GetCompactStatusAsync(profile);
             }
             catch (Exception ex)
             {
-                MessageBox.Show(this, ex.Message, "LEC — Compactar pastas", MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
+                var anyway = MessageBox.Show(
+                    this,
+                    CompactPrompt.BuildCloseAnywayPrompt(ex.Message),
+                    "LEC — Compactar pastas",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Warning);
+                if (anyway != MessageBoxResult.Yes)
+                    return;
             }
 
-            if (status.PendingFolderCount > 0)
+            if (status is { PendingFolderCount: > 0 })
             {
                 var answer = MessageBox.Show(
                     this,
@@ -313,14 +319,24 @@ public partial class MainWindow : Window
         e.Cancel = true;
         try
         {
-            CompactStatus status;
+            CompactStatus? status = null;
             try
             {
                 status = await _viewModel.GetAggregatedCompactStatusAsync();
             }
             catch (Exception ex)
             {
-                MessageBox.Show(this, ex.Message, "LEC — Compactar pastas", MessageBoxButton.OK, MessageBoxImage.Warning);
+                var anyway = MessageBox.Show(
+                    this,
+                    CompactPrompt.BuildCloseAnywayPrompt(ex.Message),
+                    "LEC — Compactar pastas",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Warning);
+                if (anyway == MessageBoxResult.Yes)
+                {
+                    _forceClose = true;
+                    _ = Dispatcher.BeginInvoke(new Action(Close));
+                }
                 return;
             }
 

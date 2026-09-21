@@ -16,4 +16,9 @@ internal static class CompactPrompt
         string where = forSingleProfile ? " neste perfil" : "";
         return $"Há {folderCount} pasta(s) com espaço a recuperar ({FormatBytes(bytes)}){where}. Compactar agora?";
     }
+
+    public static string BuildCloseAnywayPrompt(string errorMessage)
+        => errorMessage
+            + Environment.NewLine + Environment.NewLine
+            + "Não foi possível verificar o espaço a recuperar. Fechar mesmo assim?";
 }
