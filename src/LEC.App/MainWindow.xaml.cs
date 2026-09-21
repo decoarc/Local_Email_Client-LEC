@@ -208,10 +208,32 @@ public partial class MainWindow : Window
             _viewModel.OpenProfile(Path.GetDirectoryName(dialog.FileName)!);
     }
 
-    private void CloseProfile_Click(object sender, RoutedEventArgs e)
+    private async void CloseProfile_Click(object sender, RoutedEventArgs e)
     {
         if ((sender as FrameworkElement)?.DataContext is not ProfileViewModel profile)
             return;
+
+        var status = await _viewModel.GetCompactStatusAsync(profile);
+        if (status.PendingFolderCount > 0)
+        {
+            var answer = MessageBox.Show(
+                this,
+                CompactPrompt.BuildClosePrompt(status.PendingFolderCount, status.TotalEstimatedReclaimableBytes, forSingleProfile: true),
+                "LEC — Compactar pastas",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+            if (answer == MessageBoxResult.Yes)
+            {
+                var dialog = new CompactProgressDialog(_viewModel, profile) { Owner = this };
+                bool? ok = dialog.ShowDialog();
+                if (ok != true)
+                {
+                    MessageBox.Show(this, dialog.Failure?.Message ?? "A compactação não foi concluída.",
+                        "LEC — Compactar pastas", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return; // profile stays open
+                }
+            }
+        }
 
         // A scavenge scan reads through the profile's DbxStore/DbxEmailFile in the
         // background -- cancel it before disposing that store below, so the scan sees a
