@@ -907,7 +907,58 @@ public sealed class DbxStore : IMailStore
     }
 
     public Task CompactFolderAsync(int folderId, CancellationToken ct = default)
-        => throw new NotImplementedException();
+    {
+        return Task.Run(() =>
+        {
+            var folder = _folders.FirstOrDefault(f => f.Id == folderId)
+                ?? throw new InvalidOperationException($"Pasta {folderId} não encontrada.");
+
+            if (!_backingFileNames.TryGetValue(folderId, out var fileName) || fileName is null)
+                return;
+
+            string filePath = Path.Combine(_profileDirectory, fileName);
+            if (!File.Exists(filePath))
+                return;
+
+            EnsureMovedLoaded(folder);
+            EnsureDeletedLoaded(folder);
+            var hidden = _hiddenOffsetsByFolder[folderId];
+            var deleted = _deletedOffsetsByFolder[folderId];
+            if (hidden.Count == 0 && deleted.Count == 0)
+                return;
+
+            List<DbxMessageWriteEntry> entries;
+            using (var current = DbxEmailFile.Open(filePath))
+            {
+                if (current.Health != StoreHealth.Ok)
+                    throw new InvalidOperationException(
+                        $"\"{fileName}\" está danificado; compactar reescreveria o arquivo e descartaria as mensagens ilegíveis.");
+
+                entries = current.Messages
+                    .Where(info => !hidden.Contains(info.IndexNodeOffset) && !deleted.Contains(info.IndexNodeOffset))
+                    .Select(info => new DbxMessageWriteEntry(
+                        current.ReadMessageRaw(info, out _), info.Subject, info.SenderName, info.SenderAddress,
+                        info.MessageId, info.SendTimeUtc, info.Flags,
+                        info.ReceiverName, info.ReceiverAddress, info.ReceiveTimeUtc))
+                    .ToList();
+            }
+
+            if (_openFolders.Remove(folderId, out var stale))
+                stale.Dispose();
+            _messagesByFolder.Remove(folderId);
+
+            DbxEmailFileWriter.Rebuild(filePath, entries);
+
+            _movedMessageCache.ClearFolder(_profileDirectory, fileName);
+            _hiddenOffsetsByFolder.Remove(folderId);
+            _deletedMessageCache.ClearFolder(_profileDirectory, fileName);
+            _deletedOffsetsByFolder.Remove(folderId);
+            _scavengeCache.ClearScan(_profileDirectory, fileName);
+            _scavengeStatusByFolder.Remove(folderId);
+            _recoveredItemsByFolder.Remove(folderId);
+            _recoveredByFolder.Remove(folderId);
+        }, ct);
+    }
 
     public Task CompactAllPendingAsync(IProgress<CompactProgress>? progress = null, CancellationToken ct = default)
         => throw new NotImplementedException();

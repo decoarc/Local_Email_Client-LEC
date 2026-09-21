@@ -89,4 +89,97 @@ public class DbxStoreCompactTests
             Directory.Delete(dir, recursive: true);
         }
     }
+
+    [Fact]
+    public async Task CompactFolderAsyncRemovesHiddenMessagesAndShrinksTheFile()
+    {
+        string dir = BuildProfileWithTwoMessages();
+        string deletedCache = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + "-deleted.db");
+        try
+        {
+            long sizeBefore;
+            using (var store = DbxStore.Open(dir, deletedMessageCacheDatabasePath: deletedCache))
+            {
+                var folder = store.Folders.Single();
+                var headers = new List<MessageHeader>();
+                await foreach (var h in store.EnumerateHeadersAsync(folder))
+                    headers.Add(h);
+
+                await store.DeleteMessageAsync(headers.Single(h => h.Subject == "Morta").Id);
+                sizeBefore = new FileInfo(Path.Combine(dir, "Inbox.dbx")).Length;
+
+                await store.CompactFolderAsync(folder.Id);
+
+                var after = new List<MessageHeader>();
+                await foreach (var h in store.EnumerateHeadersAsync(folder))
+                    after.Add(h);
+                Assert.Equal("Viva", Assert.Single(after).Subject);
+
+                long sizeAfter = new FileInfo(Path.Combine(dir, "Inbox.dbx")).Length;
+                Assert.True(sizeAfter < sizeBefore, $"expected shrink {sizeBefore} -> {sizeAfter}");
+
+                var status = await store.GetCompactStatusAsync();
+                Assert.Empty(status.PendingFolders);
+            }
+
+            // Caches purged: reopen with same deleted DB — Morta must not stay hidden-by-stale-offset
+            using (var reopened = DbxStore.Open(dir, deletedMessageCacheDatabasePath: deletedCache))
+            {
+                var folder = reopened.Folders.Single();
+                var headers = new List<MessageHeader>();
+                await foreach (var h in reopened.EnumerateHeadersAsync(folder))
+                    headers.Add(h);
+                Assert.Equal("Viva", Assert.Single(headers).Subject);
+            }
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            File.Delete(deletedCache);
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CompactFolderAsyncIsNoOpWhenNothingPending()
+    {
+        string dir = BuildProfileWithTwoMessages();
+        try
+        {
+            using var store = DbxStore.Open(dir);
+            var folder = store.Folders.Single();
+            long before = new FileInfo(Path.Combine(dir, "Inbox.dbx")).Length;
+            await store.CompactFolderAsync(folder.Id);
+            long after = new FileInfo(Path.Combine(dir, "Inbox.dbx")).Length;
+            Assert.Equal(before, after);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CompactFolderAsyncSucceedsWhenFolderWasAlreadyEnumerated()
+    {
+        // Same lock race AddMessageAsync already covers: enumerate first, then compact.
+        string dir = BuildProfileWithTwoMessages();
+        string deletedCache = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + "-deleted.db");
+        try
+        {
+            using var store = DbxStore.Open(dir, deletedMessageCacheDatabasePath: deletedCache);
+            var folder = store.Folders.Single();
+            var headers = new List<MessageHeader>();
+            await foreach (var h in store.EnumerateHeadersAsync(folder))
+                headers.Add(h);
+            await store.DeleteMessageAsync(headers.Single(h => h.Subject == "Morta").Id);
+            await store.CompactFolderAsync(folder.Id); // must not throw UnauthorizedAccessException
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            File.Delete(deletedCache);
+            Directory.Delete(dir, recursive: true);
+        }
+    }
 }
