@@ -43,8 +43,10 @@
     </Window.Resources>
     <DockPanel>
         <Menu DockPanel.Dock="Top">
-            <MenuItem Header="_Arquivo">
+            <MenuItem Header="_Arquivo" SubmenuOpened="ArquivoMenu_SubmenuOpened">
                 <MenuItem Header="_Abrir Perfil..." Click="OpenProfile_Click"/>
+                <MenuItem x:Name="CompactAllPendingMenuItem" Header="Compactar tudo pendente..."
+                          Click="CompactAllPending_Click" IsEnabled="False"/>
             </MenuItem>
         </Menu>
         <StatusBar DockPanel.Dock="Bottom">
@@ -91,12 +93,14 @@
                                                        FontWeight="{Binding IsSpecial, Converter={StaticResource SpecialToFontWeightConverter}}"
                                                        ToolTip="{Binding IsLoadable, Converter={StaticResource NotLoadableTooltipConverter}}">
                                                 <TextBlock.ContextMenu>
-                                                    <ContextMenu>
+                                                    <ContextMenu Opened="FolderContextMenu_Opened">
                                                         <MenuItem Header="Nova subpasta aqui..." Click="NewSubfolder_Click"/>
                                                         <MenuItem Header="Mover pasta..." Click="MoveFolder_Click"
                                                                   Visibility="{Binding IsSpecial, Converter={StaticResource SpecialToVisibilityConverter}}"/>
                                                         <MenuItem Header="Apagar pasta" Click="DeleteFolder_Click"
                                                                   Visibility="{Binding IsSpecial, Converter={StaticResource SpecialToVisibilityConverter}}"/>
+                                                        <MenuItem x:Name="CompactFolderMenuItem" Header="Compactar esta pasta..."
+                                                                  Click="CompactFolder_Click" IsEnabled="False"/>
                                                     </ContextMenu>
                                                 </TextBlock.ContextMenu>
                                             </TextBlock>

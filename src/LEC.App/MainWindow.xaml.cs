@@ -247,6 +247,173 @@ public partial class MainWindow : Window
         _viewModel.CloseProfile(profile);
     }
 
+    private async void ArquivoMenu_SubmenuOpened(object sender, RoutedEventArgs e)
+    {
+        CompactAllPendingMenuItem.IsEnabled = false;
+        if (ResolveCompactTargetProfile() is not { } profile)
+            return;
+
+        try
+        {
+            var status = await _viewModel.GetCompactStatusAsync(profile);
+            CompactAllPendingMenuItem.IsEnabled = status.PendingFolderCount > 0;
+        }
+        catch
+        {
+            CompactAllPendingMenuItem.IsEnabled = false;
+        }
+    }
+
+    private async void FolderContextMenu_Opened(object sender, RoutedEventArgs e)
+    {
+        if (sender is not ContextMenu menu)
+            return;
+
+        var compactItem = menu.Items.OfType<MenuItem>()
+            .FirstOrDefault(i => i.Name == "CompactFolderMenuItem");
+        if (compactItem is null)
+            return;
+
+        compactItem.IsEnabled = false;
+
+        if (!TryResolveFolderContext(menu, out var profile, out var node, out _))
+            return;
+
+        try
+        {
+            var status = await _viewModel.GetCompactStatusAsync(profile);
+            compactItem.IsEnabled = status.PendingFolders.Any(f => f.FolderId == node.Folder.Id);
+        }
+        catch
+        {
+            compactItem.IsEnabled = false;
+        }
+    }
+
+    private async void CompactFolder_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as MenuItem)?.Parent is not ContextMenu menu)
+            return;
+        if (!TryResolveFolderContext(menu, out var profile, out var node, out _))
+            return;
+
+        CompactStatus status;
+        try
+        {
+            status = await _viewModel.GetCompactStatusAsync(profile);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "LEC — Compactar pasta", MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
+
+        var pending = status.PendingFolders.FirstOrDefault(f => f.FolderId == node.Folder.Id);
+        if (pending is null)
+            return;
+
+        var answer = MessageBox.Show(this,
+            $"Compactar a pasta \"{node.DisplayName}\" ({CompactPrompt.FormatBytes(pending.EstimatedReclaimableBytes)})?",
+            "LEC — Compactar pasta",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+        if (answer != MessageBoxResult.Yes)
+            return;
+
+        var dialog = new CompactProgressDialog(_viewModel, profile, node.Folder.Id, node.DisplayName) { Owner = this };
+        bool? ok = dialog.ShowDialog();
+        if (ok != true)
+        {
+            MessageBox.Show(this, dialog.Failure?.Message ?? "A compactação não foi concluída.",
+                "LEC — Compactar pasta", MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
+
+        if (ReferenceEquals(_selectedProfile, profile)
+            && _selectedNode is { } current
+            && current.Folder.Id == node.Folder.Id)
+        {
+            await _viewModel.SelectFolderAsync(profile, current);
+            ResetMessageSearchUi();
+            NavigateToRenderedMessage(string.Empty);
+        }
+
+        _viewModel.StatusText = "Compactação concluída";
+    }
+
+    private async void CompactAllPending_Click(object sender, RoutedEventArgs e)
+    {
+        if (ResolveCompactTargetProfile() is not { } profile)
+            return;
+
+        CompactStatus status;
+        try
+        {
+            status = await _viewModel.GetCompactStatusAsync(profile);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "LEC — Compactar pastas", MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
+
+        if (status.PendingFolderCount == 0)
+            return;
+
+        var answer = MessageBox.Show(this,
+            CompactPrompt.BuildClosePrompt(status.PendingFolderCount, status.TotalEstimatedReclaimableBytes, forSingleProfile: true),
+            "LEC — Compactar pastas",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+        if (answer != MessageBoxResult.Yes)
+            return;
+
+        var dialog = new CompactProgressDialog(_viewModel, profile) { Owner = this };
+        bool? ok = dialog.ShowDialog();
+        if (ok != true)
+        {
+            MessageBox.Show(this, dialog.Failure?.Message ?? "A compactação não foi concluída.",
+                "LEC — Compactar pastas", MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
+
+        if (ReferenceEquals(_selectedProfile, profile) && _selectedNode is { } node)
+        {
+            await _viewModel.SelectFolderAsync(profile, node);
+            ResetMessageSearchUi();
+            NavigateToRenderedMessage(string.Empty);
+        }
+
+        _viewModel.StatusText =
+            $"Compactadas {status.PendingFolderCount} pasta(s) ({CompactPrompt.FormatBytes(status.TotalEstimatedReclaimableBytes)})";
+    }
+
+    private ProfileViewModel? ResolveCompactTargetProfile()
+        => _selectedProfile ?? _viewModel.ActiveProfile;
+
+    private bool TryResolveFolderContext(
+        ContextMenu menu,
+        out ProfileViewModel profile,
+        out FolderNodeViewModel node,
+        out TreeView treeView)
+    {
+        profile = null!;
+        node = null!;
+        treeView = null!;
+
+        if (menu.PlacementTarget is not FrameworkElement placementTarget)
+            return false;
+        if (placementTarget.DataContext is not FolderNodeViewModel folderNode)
+            return false;
+        if (FindAncestor<TreeView>(placementTarget) is not { DataContext: ProfileViewModel owner } ownerTree)
+            return false;
+
+        profile = owner;
+        node = folderNode;
+        treeView = ownerTree;
+        return true;
+    }
+
     private async void FolderTreeView_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
     {
         try

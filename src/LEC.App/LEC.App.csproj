@@ -23,4 +23,8 @@
     <Resource Include="Assets\LEC_Logo.png" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="LEC.App.Tests" />
+  </ItemGroup>
+
 </Project>
