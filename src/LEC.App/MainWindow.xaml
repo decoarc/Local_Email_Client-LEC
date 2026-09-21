@@ -5,7 +5,8 @@
         xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
         xmlns:conv="clr-namespace:LEC.App.Converters"
         Title="LEC — Local Email Client" Height="720" Width="1100"
-        Icon="Assets/LEC_Logo.png">
+        Icon="Assets/LEC_Logo.png"
+        Closing="MainWindow_Closing">
     <Window.Resources>
         <conv:LoadableToBrushConverter x:Key="LoadableToBrushConverter"/>
         <conv:SpecialToFontWeightConverter x:Key="SpecialToFontWeightConverter"/>

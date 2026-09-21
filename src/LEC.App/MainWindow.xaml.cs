@@ -1,4 +1,5 @@
 // src/LEC.App/MainWindow.xaml.cs
+using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Windows;
@@ -33,6 +34,8 @@ public partial class MainWindow : Window
     // running in the background (see ScavengeButton_Click's scanProfile/scanNode snapshot).
     private ProfileViewModel? _scavengeProfile;
     private readonly HashSet<ProfileViewModel> _closingProfiles = new();
+    private bool _forceClose;
+    private bool _handlingClose;
     private ProfileViewModel? _selectedProfile;
     private FolderNodeViewModel? _selectedNode;
     private TreeView? _selectedTreeView;
@@ -286,6 +289,76 @@ public partial class MainWindow : Window
         finally
         {
             _closingProfiles.Remove(profile);
+        }
+    }
+
+    // Closing cannot await before e.Cancel is set — the first await resumes after
+    // Closing has already returned. Cancel first when any profile is open, then
+    // continue async; Close() again with _forceClose. MessageBox/ShowDialog pump
+    // the dispatcher, so a nested close is ignored via _handlingClose.
+    private async void MainWindow_Closing(object sender, CancelEventArgs e)
+    {
+        if (_forceClose)
+            return;
+        if (_handlingClose)
+        {
+            e.Cancel = true;
+            return;
+        }
+
+        if (_viewModel.OpenProfiles.Count == 0)
+            return;
+
+        _handlingClose = true;
+        e.Cancel = true;
+        try
+        {
+            CompactStatus status;
+            try
+            {
+                status = await _viewModel.GetAggregatedCompactStatusAsync();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, ex.Message, "LEC — Compactar pastas", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            if (status.PendingFolderCount == 0)
+            {
+                _forceClose = true;
+                _ = Dispatcher.BeginInvoke(new Action(Close));
+                return;
+            }
+
+            var answer = MessageBox.Show(
+                this,
+                CompactPrompt.BuildClosePrompt(status.PendingFolderCount, status.TotalEstimatedReclaimableBytes, forSingleProfile: false),
+                "LEC — Compactar pastas",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+            if (answer == MessageBoxResult.No)
+            {
+                _forceClose = true;
+                _ = Dispatcher.BeginInvoke(new Action(Close));
+                return;
+            }
+
+            var dialog = new CompactProgressDialog(_viewModel, _viewModel.OpenProfiles.ToList()) { Owner = this };
+            if (dialog.ShowDialog() == true)
+            {
+                _forceClose = true;
+                _ = Dispatcher.BeginInvoke(new Action(Close));
+            }
+            else
+            {
+                MessageBox.Show(this, dialog.Failure?.Message ?? "A compactação não foi concluída.",
+                    "LEC — Compactar pastas", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+        finally
+        {
+            _handlingClose = false;
         }
     }
 
