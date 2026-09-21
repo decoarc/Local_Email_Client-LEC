@@ -790,16 +790,74 @@ public class MainWindowViewModelTests
     {
         var folder = new StoreFolder { Id = 1, Name = "Inbox", IsLoadable = true, HasBackingFile = true };
         var store = new FakeMailStore(folders: new[] { folder });
-        store.CompactStatusToReturn = new CompactStatus(new[]
-        {
-            new CompactFolderStatus(1, "Inbox", 1000),
-        });
         var profile = new ProfileViewModel("P", @"C:\p", store);
         var vm = new MainWindowViewModel();
 
         await vm.CompactFolderAsync(profile, 1);
 
         Assert.Equal(new[] { 1 }, store.CompactedFolderIds);
+    }
+
+    [Fact]
+    public async Task CompactFolderAsyncCancelsContentPreloadBeforeCompacting()
+    {
+        var (vm, profile, store) = await OpenProfileWithBlockedContentPreloadAsync();
+
+        await vm.CompactFolderAsync(profile, 1);
+
+        await AssertContentPreloadWasCancelledAsync(vm);
+        Assert.Equal(new[] { 1 }, store.CompactedFolderIds);
+    }
+
+    [Fact]
+    public async Task CompactAllPendingAsyncCancelsContentPreloadBeforeCompacting()
+    {
+        var (vm, profile, store) = await OpenProfileWithBlockedContentPreloadAsync();
+        store.CompactStatusToReturn = new CompactStatus(new[]
+        {
+            new CompactFolderStatus(1, "Inbox", 1000),
+        });
+
+        await vm.CompactAllPendingAsync(profile);
+
+        await AssertContentPreloadWasCancelledAsync(vm);
+        Assert.Equal(new[] { 1 }, store.CompactedFolderIds);
+    }
+
+    private static async Task<(MainWindowViewModel Vm, ProfileViewModel Profile, FakeMailStore Store)>
+        OpenProfileWithBlockedContentPreloadAsync()
+    {
+        var folder = new StoreFolder { Id = 1, Name = "Inbox", IsLoadable = true, HasBackingFile = true };
+        var header = new MessageHeader { Id = new MessageRef(1, 1), Subject = "Ola" };
+        var store = new FakeMailStore(
+            folders: new[] { folder },
+            headersByFolder: new() { [1] = new() { header } },
+            rawByRef: new Dictionary<MessageRef, byte[]> { [header.Id] = "x"u8.ToArray() })
+        {
+            OpenMessageGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously),
+        };
+        var profile = new ProfileViewModel("P", @"C:\p", store);
+        var vm = new MainWindowViewModel();
+        vm.OpenProfiles.Add(profile);
+
+        await vm.SelectFolderAsync(profile, new FolderNodeViewModel(folder));
+
+        var deadline = DateTime.UtcNow.AddSeconds(2);
+        while (store.OpenedMessageRefs.Count == 0 && DateTime.UtcNow < deadline)
+            await Task.Delay(10);
+
+        Assert.NotEmpty(store.OpenedMessageRefs);
+        return (vm, profile, store);
+    }
+
+    // Completes only if CancelContentPreload cancelled the in-flight OpenMessageAsync.
+    // Without that cancel, ContentLoadTask stays blocked on OpenMessageGate.
+    private static async Task AssertContentPreloadWasCancelledAsync(MainWindowViewModel vm)
+    {
+        var preload = vm.MessageList!.ContentLoadTask;
+        var winner = await Task.WhenAny(preload, Task.Delay(TimeSpan.FromSeconds(2)));
+        Assert.Same(preload, winner);
+        await preload;
     }
 
     [Fact]

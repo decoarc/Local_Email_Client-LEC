@@ -371,10 +371,18 @@ public partial class MainWindowViewModel : ObservableObject
     }
 
     public Task CompactFolderAsync(ProfileViewModel profile, int folderId, CancellationToken ct = default)
-        => profile.Store.CompactFolderAsync(folderId, ct);
+    {
+        // Same race as move/delete: DbxStore.CompactFolderAsync runs on Task.Run and evicts
+        // _openFolders/_messagesByFolder — the dictionaries the content preload reads.
+        MessageList?.CancelContentPreload();
+        return profile.Store.CompactFolderAsync(folderId, ct);
+    }
 
     public Task CompactAllPendingAsync(ProfileViewModel profile, IProgress<CompactProgress>? progress = null, CancellationToken ct = default)
-        => profile.Store.CompactAllPendingAsync(progress, ct);
+    {
+        MessageList?.CancelContentPreload();
+        return profile.Store.CompactAllPendingAsync(progress, ct);
+    }
 
     public Task<CompactStatus> GetCompactStatusAsync(ProfileViewModel profile, CancellationToken ct = default)
         => profile.Store.GetCompactStatusAsync(ct);

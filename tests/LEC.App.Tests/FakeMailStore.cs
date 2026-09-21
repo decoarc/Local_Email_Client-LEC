@@ -44,14 +44,21 @@ internal sealed class FakeMailStore : IMailStore
     // ver SwitchingFoldersMidPreloadNeverLeaksThePreviousFoldersBodiesIntoTheNewFolder.
     public List<MessageRef> OpenedMessageRefs { get; } = new();
 
-    public Task<Stream> OpenMessageAsync(MessageRef id, CancellationToken ct = default)
+    // Optional gate so a test can keep PreloadContentAsync blocked inside OpenMessageAsync
+    // and observe that CancelContentPreload actually unblocks it (via ct).
+    public TaskCompletionSource? OpenMessageGate { get; set; }
+
+    public async Task<Stream> OpenMessageAsync(MessageRef id, CancellationToken ct = default)
     {
         OpenedMessageRefs.Add(id);
+
+        if (OpenMessageGate is not null)
+            await OpenMessageGate.Task.WaitAsync(ct);
 
         if (!_rawByRef.TryGetValue(id, out var raw))
             throw new InvalidOperationException($"No raw bytes registered for {id}.");
 
-        return Task.FromResult<Stream>(new MemoryStream(raw));
+        return new MemoryStream(raw);
     }
 
     public StoreHealth FolderHealthToReturn { get; set; } = StoreHealth.Ok;
