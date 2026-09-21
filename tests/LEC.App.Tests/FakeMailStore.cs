@@ -200,12 +200,22 @@ internal sealed class FakeMailStore : IMailStore
     public async Task CompactAllPendingAsync(IProgress<CompactProgress>? progress = null, CancellationToken ct = default)
     {
         var pending = CompactStatusToReturn.PendingFolders;
-        int completed = 0;
+        int succeeded = 0;
         foreach (var folder in pending)
         {
-            progress?.Report(new CompactProgress(completed, pending.Count, folder.FolderName));
-            await CompactFolderAsync(folder.FolderId, ct);
-            completed++;
+            ct.ThrowIfCancellationRequested();
+            progress?.Report(new CompactProgress(succeeded, pending.Count, folder.FolderName));
+            try
+            {
+                await CompactFolderAsync(folder.FolderId, ct);
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException(
+                    $"Falha ao compactar \"{folder.FolderName}\". {succeeded} pasta(s) já compactada(s); as demais não foram alteradas.",
+                    ex);
+            }
+            succeeded++;
         }
     }
 

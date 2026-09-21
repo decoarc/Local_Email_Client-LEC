@@ -960,8 +960,30 @@ public sealed class DbxStore : IMailStore
         }, ct);
     }
 
-    public Task CompactAllPendingAsync(IProgress<CompactProgress>? progress = null, CancellationToken ct = default)
-        => throw new NotImplementedException();
+    public async Task CompactAllPendingAsync(
+        IProgress<CompactProgress>? progress = null,
+        CancellationToken ct = default)
+    {
+        var status = await GetCompactStatusAsync(ct);
+        var pending = status.PendingFolders;
+        int succeeded = 0;
+        foreach (var folder in pending)
+        {
+            ct.ThrowIfCancellationRequested();
+            progress?.Report(new CompactProgress(succeeded, pending.Count, folder.FolderName));
+            try
+            {
+                await CompactFolderAsync(folder.FolderId, ct);
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException(
+                    $"Falha ao compactar \"{folder.FolderName}\". {succeeded} pasta(s) já compactada(s); as demais não foram alteradas.",
+                    ex);
+            }
+            succeeded++;
+        }
+    }
 
     public void Dispose()
     {
