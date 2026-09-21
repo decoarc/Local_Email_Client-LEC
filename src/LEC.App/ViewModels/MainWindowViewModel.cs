@@ -369,4 +369,24 @@ public partial class MainWindowViewModel : ObservableObject
         foreach (var child in sourceNode.Children)
             await CopyFolderSubtreeAsync(sourceProfile, child, destinationProfile, created.Id, ct);
     }
+
+    public Task CompactFolderAsync(ProfileViewModel profile, int folderId, CancellationToken ct = default)
+        => profile.Store.CompactFolderAsync(folderId, ct);
+
+    public Task CompactAllPendingAsync(ProfileViewModel profile, IProgress<CompactProgress>? progress = null, CancellationToken ct = default)
+        => profile.Store.CompactAllPendingAsync(progress, ct);
+
+    public Task<CompactStatus> GetCompactStatusAsync(ProfileViewModel profile, CancellationToken ct = default)
+        => profile.Store.GetCompactStatusAsync(ct);
+
+    public async Task<CompactStatus> GetAggregatedCompactStatusAsync(CancellationToken ct = default)
+    {
+        var all = new List<CompactFolderStatus>();
+        foreach (var profile in OpenProfiles)
+        {
+            var status = await profile.Store.GetCompactStatusAsync(ct);
+            all.AddRange(status.PendingFolders);
+        }
+        return new CompactStatus(all);
+    }
 }

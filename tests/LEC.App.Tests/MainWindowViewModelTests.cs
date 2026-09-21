@@ -784,4 +784,45 @@ public class MainWindowViewModelTests
         Assert.Single(destStore.Folders);
         Assert.Empty(sourceStore.DeletedFolderIds);
     }
+
+    [Fact]
+    public async Task CompactFolderAsyncDelegatesToTheProfileStore()
+    {
+        var folder = new StoreFolder { Id = 1, Name = "Inbox", IsLoadable = true, HasBackingFile = true };
+        var store = new FakeMailStore(folders: new[] { folder });
+        store.CompactStatusToReturn = new CompactStatus(new[]
+        {
+            new CompactFolderStatus(1, "Inbox", 1000),
+        });
+        var profile = new ProfileViewModel("P", @"C:\p", store);
+        var vm = new MainWindowViewModel();
+
+        await vm.CompactFolderAsync(profile, 1);
+
+        Assert.Equal(new[] { 1 }, store.CompactedFolderIds);
+    }
+
+    [Fact]
+    public async Task GetAggregatedCompactStatusAsyncSumsOpenProfiles()
+    {
+        var store1 = new FakeMailStore(folders: Array.Empty<StoreFolder>());
+        store1.CompactStatusToReturn = new CompactStatus(new[]
+        {
+            new CompactFolderStatus(1, "A", 100),
+        });
+        var store2 = new FakeMailStore(folders: Array.Empty<StoreFolder>());
+        store2.CompactStatusToReturn = new CompactStatus(new[]
+        {
+            new CompactFolderStatus(2, "B", 200),
+            new CompactFolderStatus(3, "C", 50),
+        });
+        var vm = new MainWindowViewModel();
+        vm.OpenProfiles.Add(new ProfileViewModel("P1", @"C:\p1", store1));
+        vm.OpenProfiles.Add(new ProfileViewModel("P2", @"C:\p2", store2));
+
+        var status = await vm.GetAggregatedCompactStatusAsync();
+
+        Assert.Equal(3, status.PendingFolderCount);
+        Assert.Equal(350, status.TotalEstimatedReclaimableBytes);
+    }
 }
