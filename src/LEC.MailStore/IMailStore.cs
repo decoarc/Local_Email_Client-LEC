@@ -92,4 +92,16 @@ public interface IMailStore : IDisposable
     /// exceptions thrown). Same-store only — no cross-profile move.
     /// </summary>
     Task MoveFolderAsync(int folderId, int? newParentId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Folders in this store that still have soft-deleted or moved message bytes in their
+    /// backing .dbx (see MovedMessageCache / DeletedMessageCache). Empty when nothing to reclaim.
+    /// </summary>
+    Task<CompactStatus> GetCompactStatusAsync(CancellationToken ct = default);
+
+    Task CompactFolderAsync(int folderId, CancellationToken ct = default);
+
+    Task CompactAllPendingAsync(
+        IProgress<CompactProgress>? progress = null,
+        CancellationToken ct = default);
 }

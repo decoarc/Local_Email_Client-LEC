@@ -182,6 +182,33 @@ internal sealed class FakeMailStore : IMailStore
         return Task.CompletedTask;
     }
 
+    public CompactStatus CompactStatusToReturn { get; set; } = new(Array.Empty<CompactFolderStatus>());
+    public List<int> CompactedFolderIds { get; } = new();
+    public int? FolderIdToFailCompactOn { get; set; }
+
+    public Task<CompactStatus> GetCompactStatusAsync(CancellationToken ct = default)
+        => Task.FromResult(CompactStatusToReturn);
+
+    public Task CompactFolderAsync(int folderId, CancellationToken ct = default)
+    {
+        if (FolderIdToFailCompactOn == folderId)
+            throw new InvalidOperationException("falha simulada de compactar pasta");
+        CompactedFolderIds.Add(folderId);
+        return Task.CompletedTask;
+    }
+
+    public async Task CompactAllPendingAsync(IProgress<CompactProgress>? progress = null, CancellationToken ct = default)
+    {
+        var pending = CompactStatusToReturn.PendingFolders;
+        int completed = 0;
+        foreach (var folder in pending)
+        {
+            progress?.Report(new CompactProgress(completed, pending.Count, folder.FolderName));
+            await CompactFolderAsync(folder.FolderId, ct);
+            completed++;
+        }
+    }
+
     public bool WasDisposed { get; private set; }
 
     public void Dispose() => WasDisposed = true;

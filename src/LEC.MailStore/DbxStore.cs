@@ -867,6 +867,51 @@ public sealed class DbxStore : IMailStore
             $"Message {id} was not found. EnumerateHeadersAsync must be called for its folder before OpenMessageAsync.");
     }
 
+    public Task<CompactStatus> GetCompactStatusAsync(CancellationToken ct = default)
+    {
+        return Task.Run(() =>
+        {
+            var pending = new List<CompactFolderStatus>();
+            foreach (var folder in _folders.OrderBy(f => f.Id))
+            {
+                ct.ThrowIfCancellationRequested();
+                if (!_backingFileNames.TryGetValue(folder.Id, out var fileName) || fileName is null)
+                    continue;
+
+                string filePath = Path.Combine(_profileDirectory, fileName);
+                if (!File.Exists(filePath))
+                    continue;
+
+                EnsureMovedLoaded(folder);
+                EnsureDeletedLoaded(folder);
+                var wasteOffsets = new HashSet<int>(_hiddenOffsetsByFolder[folder.Id]);
+                wasteOffsets.UnionWith(_deletedOffsetsByFolder[folder.Id]);
+                if (wasteOffsets.Count == 0)
+                    continue;
+
+                long bytes = 0;
+                using (var emailFile = DbxEmailFile.Open(filePath))
+                {
+                    foreach (var info in emailFile.Messages)
+                    {
+                        if (wasteOffsets.Contains(info.IndexNodeOffset))
+                            bytes += info.MessageSize;
+                    }
+                }
+
+                pending.Add(new CompactFolderStatus(folder.Id, folder.Name, bytes));
+            }
+
+            return new CompactStatus(pending);
+        }, ct);
+    }
+
+    public Task CompactFolderAsync(int folderId, CancellationToken ct = default)
+        => throw new NotImplementedException();
+
+    public Task CompactAllPendingAsync(IProgress<CompactProgress>? progress = null, CancellationToken ct = default)
+        => throw new NotImplementedException();
+
     public void Dispose()
     {
         foreach (var file in _openFolders.Values)
