@@ -347,6 +347,37 @@ public class DbxStoreAddMessageTests
         }
     }
 
+    [Fact]
+    public async Task AddMessagesAsyncRewritesTheDestinationOnce()
+    {
+        string dir = BuildProfileWithOneEmptyFolder();
+        string backupRoot = Path.Combine(Path.GetTempPath(), $"lec-backups-{Guid.NewGuid():N}");
+        try
+        {
+            byte[] originalBytes = File.ReadAllBytes(Path.Combine(dir, "Destino.dbx"));
+            using var store = DbxStore.Open(dir, backupRootDirectory: backupRoot);
+            int folderId = store.Folders.Single().Id;
+
+            await store.AddMessagesAsync(folderId, new[]
+            {
+                new OutgoingMessage(Encoding.UTF8.GetBytes("um"), "Um", null, null, null, null),
+                new OutgoingMessage(Encoding.UTF8.GetBytes("dois"), "Dois", null, null, null, null),
+            });
+
+            string bakPath = Assert.Single(Directory.GetFiles(backupRoot, "Destino.dbx.bak", SearchOption.AllDirectories));
+            Assert.Equal(originalBytes, File.ReadAllBytes(bakPath));
+
+            var headers = await CollectAsync(store.EnumerateHeadersAsync(store.Folders.Single()));
+            Assert.Equal(new[] { "Um", "Dois" }, headers.Select(h => h.Subject));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+            if (Directory.Exists(backupRoot))
+                Directory.Delete(backupRoot, recursive: true);
+        }
+    }
+
     private static byte[] BuildDamagedEmailDbx()
     {
         var builder = new TestDbxBuilder();

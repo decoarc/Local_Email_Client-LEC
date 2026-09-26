@@ -411,6 +411,7 @@ public class MainWindowViewModelTests
 
         await viewModel.MoveMessagesAsync(sourceProfile, messages, destProfile, destFolder.Id);
 
+        Assert.Equal(1, destStore.AddMessagesCallCount);
         Assert.Equal(2, destStore.AddedMessages.Count);
         Assert.All(destStore.AddedMessages, m => Assert.Equal(destFolder.Id, m.FolderId));
         Assert.Contains(ref1, sourceStore.HiddenMessageRefs);
@@ -449,11 +450,47 @@ public class MainWindowViewModelTests
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => viewModel.MoveMessagesAsync(sourceProfile, messages, destProfile, destFolder.Id));
 
-        Assert.Contains("1 de 3", ex.Message);
-        Assert.Contains(ref1, sourceStore.HiddenMessageRefs); // succeeded before the failure
-        Assert.DoesNotContain(ref2, sourceStore.HiddenMessageRefs); // this one failed to copy, so never hidden
-        Assert.DoesNotContain(ref3, sourceStore.HiddenMessageRefs); // never attempted
-        Assert.Single(destStore.AddedMessages); // only "Um" made it to the destination
+        Assert.Contains("0 de 3", ex.Message);
+        Assert.Empty(sourceStore.HiddenMessageRefs); // destination rewrite failed, so nothing was hidden
+        Assert.Empty(destStore.AddedMessages);
+        Assert.Equal(1, destStore.AddMessagesCallCount);
+    }
+
+    [Fact]
+    public async Task MoveMessagesAsyncHidesNothingWhenTheDestinationRewriteFailsAndReportsCopiesWhenAHideFails()
+    {
+        var sourceFolder = new StoreFolder { Id = 1, Name = "Origem", IsLoadable = true, HasBackingFile = true };
+        var ref1 = new MessageRef(sourceFolder.Id, 1);
+        var ref2 = new MessageRef(sourceFolder.Id, 2);
+        var sourceStore = new FakeMailStore(
+            folders: new[] { sourceFolder },
+            rawByRef: new Dictionary<MessageRef, byte[]>
+            {
+                [ref1] = "um"u8.ToArray(),
+                [ref2] = "dois"u8.ToArray(),
+            })
+        { MessageRefToFailOnHide = ref2 };
+        var sourceProfile = new ProfileViewModel("Origem", @"C:\perfis\Origem", sourceStore);
+
+        var destFolder = new StoreFolder { Id = 10, Name = "Destino", IsLoadable = true, HasBackingFile = true };
+        var destStore = new FakeMailStore(folders: new[] { destFolder });
+        var destProfile = new ProfileViewModel("Destino", @"C:\perfis\Destino", destStore);
+
+        var messages = new List<MessageHeader>
+        {
+            new() { Id = ref1, Subject = "Um" },
+            new() { Id = ref2, Subject = "Dois" },
+        };
+        var viewModel = new MainWindowViewModel();
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => viewModel.MoveMessagesAsync(sourceProfile, messages, destProfile, destFolder.Id));
+
+        Assert.Contains("As cópias já foram gravadas no destino", ex.Message);
+        Assert.Contains("1 de 2", ex.Message);
+        Assert.Equal(2, destStore.AddedMessages.Count);
+        Assert.Contains(ref1, sourceStore.HiddenMessageRefs);
+        Assert.DoesNotContain(ref2, sourceStore.HiddenMessageRefs);
     }
 
     [Fact]
@@ -524,7 +561,7 @@ public class MainWindowViewModelTests
     }
 
     [Fact]
-    public async Task MoveMessagesAsyncStopsBetweenMessagesWhenCancelled()
+    public async Task MoveMessagesAsyncDoesNotRewriteWhenAlreadyCancelled()
     {
         var sourceFolder = new StoreFolder { Id = 1, Name = "Origem", IsLoadable = true, HasBackingFile = true };
         var ref1 = new MessageRef(sourceFolder.Id, 1);
@@ -549,21 +586,48 @@ public class MainWindowViewModelTests
         };
         var viewModel = new MainWindowViewModel();
         var cts = new CancellationTokenSource();
-        var reported = new List<double>();
-        // Cancel as soon as the 1st message's progress comes in, before the loop reaches the 2nd.
-        var progress = new SynchronousProgress<double>(p =>
-        {
-            reported.Add(p);
-            cts.Cancel();
-        });
+        cts.Cancel();
 
         await Assert.ThrowsAsync<OperationCanceledException>(
-            () => viewModel.MoveMessagesAsync(sourceProfile, messages, destProfile, destFolder.Id, progress, cts.Token));
+            () => viewModel.MoveMessagesAsync(sourceProfile, messages, destProfile, destFolder.Id, progress: null, cts.Token));
 
-        Assert.Single(reported); // only the 1st message ever got to report
-        Assert.Single(destStore.AddedMessages); // only the 1st message was actually moved
+        Assert.Empty(destStore.AddedMessages);
+        Assert.Empty(sourceStore.HiddenMessageRefs);
+    }
+
+    [Fact]
+    public async Task MoveMessagesAsyncStillHidesEveryOriginalWhenCancelledAfterTheRewrite()
+    {
+        var sourceFolder = new StoreFolder { Id = 1, Name = "Origem", IsLoadable = true, HasBackingFile = true };
+        var ref1 = new MessageRef(sourceFolder.Id, 1);
+        var ref2 = new MessageRef(sourceFolder.Id, 2);
+        var sourceStore = new FakeMailStore(
+            folders: new[] { sourceFolder },
+            rawByRef: new Dictionary<MessageRef, byte[]>
+            {
+                [ref1] = "um"u8.ToArray(),
+                [ref2] = "dois"u8.ToArray(),
+            });
+        var sourceProfile = new ProfileViewModel("Origem", @"C:\perfis\Origem", sourceStore);
+
+        var destFolder = new StoreFolder { Id = 10, Name = "Destino", IsLoadable = true, HasBackingFile = true };
+        var destStore = new FakeMailStore(folders: new[] { destFolder });
+        var destProfile = new ProfileViewModel("Destino", @"C:\perfis\Destino", destStore);
+
+        var messages = new List<MessageHeader>
+        {
+            new() { Id = ref1, Subject = "Um" },
+            new() { Id = ref2, Subject = "Dois" },
+        };
+        var viewModel = new MainWindowViewModel();
+        var cts = new CancellationTokenSource();
+        var progress = new SynchronousProgress<double>(_ => cts.Cancel());
+
+        await viewModel.MoveMessagesAsync(sourceProfile, messages, destProfile, destFolder.Id, progress, cts.Token);
+
+        Assert.Equal(2, destStore.AddedMessages.Count);
         Assert.Contains(ref1, sourceStore.HiddenMessageRefs);
-        Assert.DoesNotContain(ref2, sourceStore.HiddenMessageRefs); // 2nd message never attempted
+        Assert.Contains(ref2, sourceStore.HiddenMessageRefs);
     }
 
     [Fact]

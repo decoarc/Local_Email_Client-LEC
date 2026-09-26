@@ -61,6 +61,13 @@ public interface IMailStore : IDisposable
         string? senderAddress, string? messageId, DateTime? dateUtc, CancellationToken ct = default);
 
     /// <summary>
+    /// Appends several messages to one folder with a single backup and a single rebuild of
+    /// that folder's .dbx. Empty <paramref name="messages"/> is a no-op. See
+    /// DbxStore.AddMessagesAsync.
+    /// </summary>
+    Task AddMessagesAsync(int folderId, IReadOnlyList<OutgoingMessage> messages, CancellationToken ct = default);
+
+    /// <summary>
     /// Marks a message as moved away from its folder — EnumerateHeadersAsync stops
     /// returning it from now on. Never writes to the backing .dbx; this is purely a
     /// local, app-side "hide" marker (see MovedMessageCache). A no-op, not an error, if

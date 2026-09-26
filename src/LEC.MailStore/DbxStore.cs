@@ -405,6 +405,17 @@ public sealed class DbxStore : IMailStore
     public Task AddMessageAsync(int folderId, byte[] rawMessage, string? subject, string? senderName,
         string? senderAddress, string? messageId, DateTime? dateUtc, CancellationToken ct = default)
     {
+        return AddMessagesAsync(folderId, new[]
+        {
+            new OutgoingMessage(rawMessage, subject, senderName, senderAddress, messageId, dateUtc),
+        }, ct);
+    }
+
+    public Task AddMessagesAsync(int folderId, IReadOnlyList<OutgoingMessage> messages, CancellationToken ct = default)
+    {
+        if (messages.Count == 0)
+            return Task.CompletedTask;
+
         return Task.Run(() =>
         {
             if (!_folders.Any(f => f.Id == folderId))
@@ -442,7 +453,13 @@ public sealed class DbxStore : IMailStore
                 stale.Dispose();
             _messagesByFolder.Remove(folderId);
 
-            entries.Add(new DbxMessageWriteEntry(rawMessage, subject, senderName, senderAddress, messageId, dateUtc));
+            foreach (var message in messages)
+            {
+                entries.Add(new DbxMessageWriteEntry(
+                    message.RawBytes, message.Subject, message.SenderName, message.SenderAddress,
+                    message.MessageId, message.DateUtc));
+            }
+
             DbxEmailFileWriter.Rebuild(filePath, entries);
 
             // Rebuild rewrote the file from scratch, so every byte offset inside it changed.

@@ -104,19 +104,36 @@ internal sealed class FakeMailStore : IMailStore
     public Task AddMessageAsync(int folderId, byte[] rawMessage, string? subject, string? senderName,
         string? senderAddress, string? messageId, DateTime? dateUtc, CancellationToken ct = default)
     {
+        return AddMessagesAsync(folderId, new[]
+        {
+            new OutgoingMessage(rawMessage, subject, senderName, senderAddress, messageId, dateUtc),
+        }, ct);
+    }
+
+    public int AddMessagesCallCount { get; private set; }
+
+    public Task AddMessagesAsync(int folderId, IReadOnlyList<OutgoingMessage> messages, CancellationToken ct = default)
+    {
+        AddMessagesCallCount++;
         if (ExceptionToThrowOnAddMessage is { } ex)
             throw ex;
-        if (subject == SubjectToFailOn)
+        if (messages.Any(m => m.Subject == SubjectToFailOn))
             throw new InvalidOperationException("falha simulada de mover mensagem");
 
-        AddedMessages.Add((folderId, rawMessage, subject, senderName, senderAddress, messageId, dateUtc));
+        foreach (var message in messages)
+            AddedMessages.Add((folderId, message.RawBytes, message.Subject, message.SenderName, message.SenderAddress, message.MessageId, message.DateUtc));
         return Task.CompletedTask;
     }
 
     public HashSet<MessageRef> HiddenMessageRefs { get; } = new();
 
+    public MessageRef? MessageRefToFailOnHide { get; set; }
+
     public Task HideMovedMessageAsync(MessageRef id, CancellationToken ct = default)
     {
+        if (MessageRefToFailOnHide == id)
+            throw new InvalidOperationException("falha simulada de ocultar mensagem");
+
         HiddenMessageRefs.Add(id);
         return Task.CompletedTask;
     }

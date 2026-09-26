@@ -212,45 +212,70 @@ public partial class MainWindowViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Moves multiple messages (all from the same source folder -- the message list only
-    /// ever shows one folder at a time) into a single chosen destination, one at a time via
-    /// the existing MoveMessageAsync, stopping at the first failure. Same "nothing to roll
-    /// back" reasoning as DeleteMessagesAsync. Optionally reports progress and honors
-    /// cancellation between messages -- see MoveMessagesProgressDialog, the only current
-    /// caller that passes them.
+    /// Moves several messages from one folder into a single destination with one rewrite of
+    /// the destination .dbx, then hides the originals. A failed rewrite hides nothing.
     /// </summary>
     /// <remarks>
-    /// <paramref name="progress"/> is reported once per message, as (messages moved so
-    /// far) / (total). <paramref name="ct"/> is only checked between messages -- a
-    /// cancellation request never interrupts a message already in flight, so the
-    /// destination's backing .dbx file is never left mid-rewrite.
+    /// <paramref name="progress"/> advances once each original is hidden, as (hidden so far)
+    /// / (total). The destination rewrite itself is one shot: <paramref name="ct"/> is
+    /// checked while the source bodies are read and before that rewrite starts, and a
+    /// cancellation never interrupts the rewrite, so the destination file is never left
+    /// mid-write. After a successful rewrite the originals are always hidden, even if
+    /// cancellation was requested during the rewrite — otherwise the copies would exist
+    /// beside the still-visible originals.
     /// </remarks>
     /// <exception cref="InvalidOperationException">
-    /// Same rewrapping as DeleteMessagesAsync, e.g. "3 de 5 mensagens movidas antes de
-    /// falhar: {mensagem original}".
+    /// When the destination rewrite fails: "0 de N mensagens movidas antes de falhar".
+    /// When a hide fails after the copies are already written: "As cópias já foram gravadas
+    /// no destino. K de N mensagens ocultadas na origem antes de falhar".
     /// </exception>
     public async Task MoveMessagesAsync(ProfileViewModel sourceProfile, IReadOnlyList<MessageHeader> messages,
         ProfileViewModel destinationProfile, int destinationFolderId,
         IProgress<double>? progress = null, CancellationToken ct = default)
     {
-        // Once at the top, not per message -- see DeleteMessagesAsync. (MoveMessageAsync
-        // cancels again on each item; cancelling an already-cancelled source is a no-op.)
         MessageList?.CancelContentPreload();
 
-        int succeeded = 0;
+        if (messages.Count == 0)
+            return;
+
+        if (ReferenceEquals(sourceProfile, destinationProfile) && messages[0].Id.FolderId == destinationFolderId)
+            throw new InvalidOperationException("Não é possível mover uma mensagem para a mesma pasta.");
+
+        var outgoing = new List<OutgoingMessage>(messages.Count);
         foreach (var message in messages)
         {
             ct.ThrowIfCancellationRequested();
+            using var stream = await sourceProfile.Store.OpenMessageAsync(message.Id, ct);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms, ct);
+            outgoing.Add(new OutgoingMessage(
+                ms.ToArray(), message.Subject, message.SenderName, message.SenderAddress, message.MessageId, message.Date));
+        }
 
+        ct.ThrowIfCancellationRequested();
+
+        try
+        {
+            await destinationProfile.Store.AddMessagesAsync(destinationFolderId, outgoing, CancellationToken.None);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new InvalidOperationException($"0 de {messages.Count} mensagens movidas antes de falhar: {ex.Message}", ex);
+        }
+
+        int hidden = 0;
+        foreach (var message in messages)
+        {
             try
             {
-                await MoveMessageAsync(sourceProfile, message, destinationProfile, destinationFolderId, CancellationToken.None);
-                succeeded++;
-                progress?.Report((double)succeeded / messages.Count);
+                await sourceProfile.Store.HideMovedMessageAsync(message.Id, CancellationToken.None);
+                hidden++;
+                progress?.Report((double)hidden / messages.Count);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                throw new InvalidOperationException($"{succeeded} de {messages.Count} mensagens movidas antes de falhar: {ex.Message}", ex);
+                throw new InvalidOperationException(
+                    $"As cópias já foram gravadas no destino. {hidden} de {messages.Count} mensagens ocultadas na origem antes de falhar: {ex.Message}", ex);
             }
         }
     }
