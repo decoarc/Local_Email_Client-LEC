@@ -6,6 +6,8 @@ Aplicação de Windows para abrir um perfil do Outlook Express (a pasta que cont
 
 O LEC trabalha nos arquivos que já estão no disco. Não há contas, envio nem sincronização com servidor.
 
+![Caixa de entrada, lista de mensagens e a mensagem aberta. O clipe marca as que têm anexo, e a segunda cópia do mesmo aviso de pagamento aparece como duplicata.](docs/screenshots/caixa-de-entrada.png)
+
 ## O que dá para fazer
 
 - Abrir um ou mais perfis ao mesmo tempo e ver as pastas lado a lado.

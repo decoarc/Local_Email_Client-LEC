@@ -6,6 +6,8 @@ A Windows application for opening an Outlook Express profile (the folder that co
 
 LEC works on files that are already on disk. There are no accounts, no sending, and no sync with a server.
 
+![Inbox, message list, and the open message. A paperclip marks messages with attachments, and the second copy of the same payment notice is flagged as a duplicate.](docs/screenshots/caixa-de-entrada.png)
+
 ## What you can do
 
 - Open one or more profiles at the same time and see their folders side by side.
