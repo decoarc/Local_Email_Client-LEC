@@ -42,7 +42,7 @@ public static class DbxScavenger
     /// Known limitation, accepted for this plan: a chain whose "next" pointer loops
     /// backward into another independently-valid candidate can be reported twice, since
     /// candidates already visited earlier in the scan are only excluded from *later*
-    /// candidates, not retroactively. Not observed in any real BCP/ file. A fully correct
+    /// candidates, not retroactively. Not observed in the real files checked for this. A fully correct
     /// fix needs a two-pass group-by-shared-offset algorithm this plan does not build.
     /// </summary>
     public static IReadOnlyList<ScavengedMessage> Scan(

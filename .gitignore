@@ -1,14 +1,13 @@
 # Build output
 bin/
 obj/
+publish/
 *.user
 .vs/
 
-# The user's real, irreplaceable legacy mail archive — never committed.
-BCP/
 
-# Scratch state for the brainstorming skill's visual companion (mockups, not deliverables).
-/.superpowers/
-
-# Isolated workspaces for subagent-driven plan execution.
-/.worktrees/
+# Local mail stores. Never commit.
+*.dbx
+*.pst
+*.ost
+*.iaf

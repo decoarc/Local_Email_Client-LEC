@@ -3,7 +3,7 @@ namespace LEC.DbxFormat;
 /// <summary>
 /// Folders.dbx info-node attribute IDs. NOT covered by undbx (it only
 /// detects the folder signature and never parses folder content) — derived
-/// empirically against the real BCP/Folders.dbx (26 folders), by matching
+/// empirically against a real Folders.dbx, by matching
 /// decoded strings against the actual folder/file names on disk. See the
 /// plan header's verification log for the full cross-reference.
 /// </summary>

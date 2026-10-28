@@ -131,8 +131,8 @@ public static class DbxFolderFileWriter
 
     // Direct-form embeds the value in the packed record's 24-bit payload
     // (DbxFormat.AttributeValueMask) — anything wider (or negative) must go pointer-form
-    // instead, or it silently truncates. Confirmed to matter on real data: BCP/Folders.dbx
-    // already has folders whose Flags need bit 24+ (e.g. 0x800010, 0x900019).
+    // instead, or it silently truncates. Confirmed to matter on real data: folder files
+    // already have Flags that need bit 24+ (e.g. 0x800010, 0x900019).
     private static bool FitsDirect(int value) => value >= 0 && (value & ~(int)DbxFormat.AttributeValueMask) == 0;
 
     private static (byte FieldId, bool Direct, uint DirectValue, byte[]? Data) DirectOrPointer(DbxFolderFieldId fieldId, int value) =>

@@ -5,10 +5,10 @@ namespace LEC.DbxFormat;
 /// Header + index-tree + attribute-record constants were cross-checked against
 /// the reverse-engineered undbx reader (github.com/ZungBang/undbx, dbxread.c,
 /// GPL-3.0 — itself based on Ulrich Krebs' DbxConv and Arne Schloh's oedbx
-/// documentation) and against real files in BCP/. The folder-attribute IDs
+/// documentation) and against real Outlook Express files. The folder-attribute IDs
 /// (marked below) are NOT in undbx — it only detects the folder signature and
 /// never parses folder content — so those were derived empirically from
-/// BCP/Folders.dbx by cross-referencing decoded strings against the real
+/// a real Folders.dbx by cross-referencing decoded strings against the real
 /// folder/file names on disk. See the plan header for the full verification log.
 /// </summary>
 public static class DbxFormat
@@ -56,7 +56,7 @@ public static class DbxFormat
     // Fase 1 never read these -- it only ever followed pointers already trusted from
     // the index tree. For scavenging raw, untrusted bytes, they're the primary defense
     // against false positives: verified against 1,639 real block headers across 3 files
-    // in BCP/ (100% match, including mid-chain and chain-end blocks, not just chain starts).
+    // (100% match, including mid-chain and chain-end blocks, not just chain starts).
     public const int MessageBlockSelfOffsetOffset = 0; // int32: must equal the block's own file offset
     public const int MessageBlockMarkerOffset = 4;     // int32: fixed marker, always equals MessageBlockMaxDataSize
 }

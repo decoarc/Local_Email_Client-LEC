@@ -23,8 +23,8 @@ public static class MessageRenderer
 
     // WebView2's CoreWebView2.NavigateToString throws above ~2 MB of HTML. Both fallback
     // paths below can otherwise carry an entire raw message (MIME boundaries, headers,
-    // base64 attachments) into a single <pre> block -- observed against the real BCP/
-    // profile up to ~11 MB. Cap well under the WebView2 limit and say so visibly rather
+    // base64 attachments) into a single <pre> block -- observed against a real profile
+    // up to ~11 MB. Cap well under the WebView2 limit and say so visibly rather
     // than truncating silently.
     private const int MaxFallbackBytes = 200_000;
 
@@ -218,7 +218,7 @@ public static class MessageRenderer
 
     // MimeMessage.Attachments é puramente baseado em ContentDisposition?.IsAttachment -- não
     // tem nenhuma noção de referência cid: (verificado contra a implementação real do MimeKit
-    // 4.17.0). Funciona corretamente pro caso comum observado em dados reais do BCP/ (parte
+    // 4.17.0). Funciona corretamente pro caso comum observado em dados reais (parte
     // cid: com Content-Disposition: inline ou sem disposition nenhuma), mas tem duas lacunas
     // conhecidas, não corrigidas nesta fase (ver design doc §9):
     //   (a) uma parte referenciada por cid: que também carrega Content-Disposition: attachment
